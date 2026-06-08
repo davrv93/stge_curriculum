@@ -5,7 +5,7 @@
    - Chat: sendAiMessage() -> streaming + continuar concatenando
 */
 (function () {
-  const MODEL = 'qwen2.5-coder:3b';
+  const MODEL = 'qwen2.5-coder:1.5b';
 
   const ST = window.JM_BRIDGE_V4 = window.JM_BRIDGE_V4 || {
     chat: {},

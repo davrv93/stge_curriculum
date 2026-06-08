@@ -432,7 +432,7 @@ $context  = trim((string)($data['context']  ?? 'user'));
     {
         $memoryCollection = 'jomelai_memory';
         $knowledgeCollection = Support::config('jomelai_rag_collection') ?: 'jomelai_knowledge';
-        $model = Support::config('ollama_default_model') ?: (Support::config('ollama_model') ?: 'qwen2.5-coder:3b');
+        $model = Support::config('ollama_default_model') ?: (Support::config('ollama_model') ?: 'qwen2.5-coder:1.5b');
 
         $memoryContext = '';
         $knowledgeContext = '';

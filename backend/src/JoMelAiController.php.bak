@@ -1,0 +1,924 @@
+<?php
+/**
+ * JoMelAiController
+ * Entry point for the Motor JoMelAi unified endpoint.
+ * POST /api/ask  — main query endpoint (auth required)
+ * GET  /api/jomelai/audit  — audit log (admin only)
+ * GET  /api/jomelai/stats  — audit stats (admin only)
+ */
+final class JoMelAiController
+{
+    public function ask(): void
+    {
+        $user = Support::requireAuth();
+        $data = Support::readJson();
+
+        $question = trim((string)($data['question'] ?? ''));
+        
+
+        // Guard directo: asesoría curricular abierta.
+        // Debe ejecutarse antes de RAG, DuckDB, FastIntent o cualquier orquestador.
+        $qCurricular = Support::normalize($question);
+
+        // Guard directo: distribución de créditos en malla/ciclos.
+        // Este caso no debe caer en RAG vacío ni en DuckDB.
+        
+        $isExplicitChartRequest = (
+            str_contains($qCurricular, 'grafico')
+            || str_contains($qCurricular, 'gráfico')
+            || str_contains($qCurricular, 'grafica')
+            || str_contains($qCurricular, 'gráfica')
+            || str_contains($qCurricular, 'chart')
+            || str_contains($qCurricular, 'barras')
+            || str_contains($qCurricular, 'barra')
+            || str_contains($qCurricular, 'pie')
+            || str_contains($qCurricular, 'pastel')
+            || str_contains($qCurricular, 'visualiza')
+            || str_contains($qCurricular, 'visualizar')
+            || str_contains($qCurricular, 'diagrama')
+            || str_contains($qCurricular, 'ranking visual')
+        );
+
+        $isCreditGridQuestion = (
+            (
+                str_contains($qCurricular, 'distribuir')
+                || str_contains($qCurricular, 'repartir')
+                || str_contains($qCurricular, 'balancear')
+                || str_contains($qCurricular, 'organizar')
+                || str_contains($qCurricular, 'estructurar')
+                || str_contains($qCurricular, 'asignar')
+            )
+            && (
+                str_contains($qCurricular, 'credito')
+                || str_contains($qCurricular, 'creditos')
+                || str_contains($qCurricular, 'crédito')
+                || str_contains($qCurricular, 'créditos')
+            )
+            && (
+                str_contains($qCurricular, 'malla')
+                || str_contains($qCurricular, 'ciclo')
+                || str_contains($qCurricular, 'ciclos')
+                || str_contains($qCurricular, 'plan de estudios')
+                || str_contains($qCurricular, 'curricular')
+            )
+        );
+
+        if ($isCreditGridQuestion && !$isExplicitChartRequest) {
+            $answer = $this->buildCurricularAdviceWithRagAndOllamaInline($question);
+
+            Support::json([
+                'ok' => true,
+                'intent' => 'curriculum_grid',
+                'visible_intent' => 'Revisar malla curricular',
+                'mode' => 'curricular_credit_grid_direct_inline',
+                'message' => '',
+                'summary' => 'Respondí con orientación curricular sobre distribución de créditos porque la pregunta solicita diseño de malla, no consulta de datos.',
+                'answer' => $answer,
+                'chart_url' => null,
+                'data_url' => null,
+                'chart' => null,
+                'table' => null,
+                'sql' => null,
+                'evidence' => [],
+                'actions' => [
+                    ['label' => 'Convertir en matriz por ciclos', 'type' => 'template'],
+                    ['label' => 'Pedir ejemplo con 200 créditos', 'type' => 'example'],
+                ],
+                'suggestions' => [
+                    'Definir total de créditos meta',
+                    'Distribuir créditos por ciclos',
+                    'Mapear áreas formativas y competencias'
+                ],
+            ]);
+            return;
+        }
+
+
+
+        $curricularActionTokens = [
+            'sugiere', 'sugerir', 'recomienda', 'recomendar',
+            'crea', 'crear', 'diseña', 'disena', 'diseñar', 'disenar',
+            'elabora', 'elaborar', 'propone', 'proponer',
+            'plantea', 'plantear', 'formula', 'formular',
+            'redacta', 'redactar', 'explica', 'explicar',
+            'actividades', 'estrategias', 'rubrica', 'rúbrica',
+            'verbos', 'alinear', 'alineacion', 'alineación', 'distribuir', 'repartir', 'balancear', 'organizar', 'estructurar'
+        ];
+
+        $curricularDomainTokens = [
+            'curso', 'cursos', 'asignatura', 'asignaturas',
+            'investigacion', 'investigación',
+            'aprendizaje', 'enseñanza', 'ensenanza',
+            'resultado', 'resultados',
+            'competencia', 'competencias',
+            'evaluacion', 'evaluación',
+            'perfil', 'egreso',
+            'malla', 'malla curricular', 'plan de estudios', 'ciclo', 'ciclos', 'creditos', 'créditos', 'carga crediticia', 'silabo', 'sílabo',
+            'semipresencial', 'didactica', 'didáctica'
+        ];
+
+        $curricularDataTokens = [
+            'cuantos', 'cuántos', 'cuantas', 'cuántas',
+            'cantidad', 'conteo', 'total',
+            'listar', 'lista', 'listame', 'muestrame', 'muéstrame',
+            'grafico', 'gráfico', 'grafica', 'gráfica',
+            'barras', 'pie', 'pastel', 'ranking', 'top',
+            'por sede', 'por facultad', 'por programa'
+        ];
+
+        $hasCurricularAction = false;
+        foreach ($curricularActionTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $hasCurricularAction = true;
+                break;
+            }
+        }
+
+        $hasCurricularDomain = false;
+        foreach ($curricularDomainTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $hasCurricularDomain = true;
+                break;
+            }
+        }
+
+        $isCurricularDataRequest = false;
+        foreach ($curricularDataTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $isCurricularDataRequest = true;
+                break;
+            }
+        }
+
+        $isOpenCurricularHow = (
+            (str_contains($qCurricular, 'como ') || str_contains($qCurricular, 'cómo '))
+            && $hasCurricularDomain
+            && !$isCurricularDataRequest
+        );
+
+        if ((($hasCurricularAction && $hasCurricularDomain) || $isOpenCurricularHow) && !$isCurricularDataRequest) {
+            $answer = $this->buildCurricularAdviceWithRagAndOllamaInline($question);
+
+            Support::json([
+                'ok' => true,
+                'intent' => 'curricular_advice',
+                'visible_intent' => 'Asesoría curricular',
+                'mode' => 'curricular_advice_direct_inline',
+                'message' => '',
+                'summary' => 'Respondí con orientación curricular porque la pregunta solicita diseño, propuesta o asesoría, no consulta de datos.',
+                'answer' => $answer,
+                'chart_url' => null,
+                'data_url' => null,
+                'chart' => null,
+                'table' => null,
+                'sql' => null,
+                'evidence' => [],
+                'actions' => [
+                    ['label' => 'Convertir en plantilla', 'type' => 'template'],
+                    ['label' => 'Pedir ejemplo aplicado', 'type' => 'example'],
+                ],
+                'suggestions' => [
+                    'Pedir una versión en formato sílabo',
+                    'Solicitar una rúbrica evaluativa',
+                    'Contextualizar por carrera o ciclo'
+                ],
+            ]);
+            return;
+        }
+
+$context  = trim((string)($data['context']  ?? 'user'));
+        $opts     = (array)($data['options'] ?? []);
+        $includeDebug = (bool)($opts['include_debug'] ?? false);
+        $isAdmin  = ($user['role'] ?? '') === 'admin';
+
+        if ($question === '') {
+            Support::json(['ok' => false, 'message' => 'La pregunta no puede estar vacía.'], 400);
+            return;
+        }
+        if (mb_strlen($question, 'UTF-8') > 2000) {
+            Support::json(['ok' => false, 'message' => 'La pregunta no debe superar los 2000 caracteres.'], 400);
+            return;
+        }
+
+        $startMs = (int)(microtime(true) * 1000);
+
+        try {
+            $classifier   = new JoMelAiIntentClassifier();
+            $intentResult = $classifier->classify($question);
+
+            $orchestrator = new JoMelAiOrchestrator();
+            $engineResult = $orchestrator->execute($intentResult, $question, $opts);
+
+            $formatter    = new JoMelAiResponseFormatter();
+            $response     = $formatter->format($intentResult, $engineResult, $includeDebug, $isAdmin);
+
+        } catch (Throwable $e) {
+            $durationMs = (int)(microtime(true) * 1000) - $startMs;
+            Support::json([
+                'ok'             => false,
+                'intent'         => 'unknown',
+                'visible_intent' => 'Error',
+                'message'        => 'Ocurrió un error al procesar tu solicitud. Inténtalo nuevamente.',
+                'summary'        => '',
+                'answer'         => '',
+                'chart_url'      => null,
+                'data_url'       => null,
+                'table'          => null,
+                'evidence'       => [],
+                'actions'        => [],
+                'suggestions'    => [],
+                'debug'          => $isAdmin && $includeDebug
+                    ? ['error' => $e->getMessage(), 'duration_ms' => $durationMs]
+                    : null,
+            ], 500);
+            return;
+        }
+
+        $durationMs = (int)(microtime(true) * 1000) - $startMs;
+        $response['_duration_ms'] = $durationMs;        // may be used by debug block
+
+        // Persist audit record (non-blocking best-effort)
+        try {
+            $engineResult['_duration_ms'] = $durationMs;
+            (new JoMelAiAuditService())->log($user, $question, $intentResult, $engineResult, $durationMs);
+        } catch (Throwable) {
+            // Audit failure must not break the main response
+        }
+
+        unset($response['_duration_ms']);
+        Support::json($response);
+    }
+
+    public function auditLog(): void
+    {
+        Support::requireAdmin();
+        $limit  = min((int)($_GET['limit']  ?? 100), 500);
+        $offset = max((int)($_GET['offset'] ?? 0),   0);
+        $rows   = (new JoMelAiAuditService())->getLog($limit, $offset);
+        Support::json(['ok' => true, 'rows' => $rows, 'limit' => $limit, 'offset' => $offset]);
+    }
+
+    public function auditStats(): void
+    {
+        Support::requireAdmin();
+        $stats = (new JoMelAiAuditService())->getStats();
+        Support::json(['ok' => true, 'stats' => $stats]);
+    }
+
+    private function detectCurricularCourseTopicInline(string $question): array
+    {
+        $q = Support::normalize($question);
+
+        $topics = [
+            'matematica' => [
+                'label' => 'Matemática',
+                'tokens' => [
+                    'matematica', 'matemática', 'calculo', 'cálculo',
+                    'algebra', 'álgebra', 'geometria', 'geometría',
+                    'estadistica', 'estadística', 'aritmetica', 'aritmética'
+                ],
+            ],
+            'investigacion' => [
+                'label' => 'Investigación',
+                'tokens' => [
+                    'investigacion', 'investigación', 'tesis', 'proyecto de investigacion',
+                    'proyecto de investigación', 'metodologia', 'metodología',
+                    'articulo cientifico', 'artículo científico'
+                ],
+            ],
+            'comunicacion' => [
+                'label' => 'Comunicación',
+                'tokens' => [
+                    'comunicacion', 'comunicación', 'redaccion', 'redacción',
+                    'lectura', 'escritura', 'oratoria', 'exposicion', 'exposición'
+                ],
+            ],
+            'programacion' => [
+                'label' => 'Programación',
+                'tokens' => [
+                    'programacion', 'programación', 'algoritmos', 'software',
+                    'codigo', 'código', 'base de datos', 'sistemas'
+                ],
+            ],
+            'salud' => [
+                'label' => 'Salud',
+                'tokens' => [
+                    'salud', 'nutricion', 'nutrición', 'enfermeria', 'enfermería',
+                    'clinica', 'clínica', 'paciente', 'comunitaria'
+                ],
+            ],
+        ];
+
+        foreach ($topics as $key => $item) {
+            foreach ($item['tokens'] as $token) {
+                if (str_contains($q, Support::normalize($token))) {
+                    return [
+                        'key' => $key,
+                        'label' => $item['label'],
+                    ];
+                }
+            }
+        }
+
+        return [
+            'key' => 'general',
+            'label' => 'el curso',
+        ];
+    }
+
+    private function buildDynamicCurricularAdviceInline(string $question): string
+    {
+        $topic = $this->detectCurricularCourseTopicInline($question);
+        $key = (string)($topic['key'] ?? 'general');
+        $label = (string)($topic['label'] ?? 'el curso');
+
+        if ($key === 'matematica') {
+            return "Para un curso de **{$label}**, conviene diseñar actividades que combinen comprensión conceptual, práctica guiada, resolución de problemas y aplicación contextual.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Diagnóstico de saberes previos**\n" .
+                "   - Evidencia: prueba breve o cuestionario sobre operaciones, conceptos base y procedimientos necesarios.\n\n" .
+                "2. **Resolución guiada de problemas modelo**\n" .
+                "   - Evidencia: desarrollo paso a paso con explicación del procedimiento y justificación de cada decisión.\n\n" .
+                "3. **Taller de errores frecuentes**\n" .
+                "   - Evidencia: corrección comentada de ejercicios con identificación del error conceptual o procedimental.\n\n" .
+                "4. **Problemas contextualizados**\n" .
+                "   - Evidencia: solución de casos aplicados a situaciones académicas, profesionales o de la vida cotidiana.\n\n" .
+                "5. **Trabajo colaborativo por estaciones**\n" .
+                "   - Evidencia: hoja de trabajo grupal con ejercicios de dificultad progresiva.\n\n" .
+                "6. **Mini exposición de estrategias de solución**\n" .
+                "   - Evidencia: explicación oral o escrita de diferentes métodos para resolver un mismo problema.\n\n" .
+                "7. **Evaluación formativa semanal**\n" .
+                "   - Evidencia: quiz corto con retroalimentación inmediata.\n\n" .
+                "8. **Proyecto de aplicación matemática**\n" .
+                "   - Evidencia: informe breve donde el estudiante modele, calcule, interprete y comunique resultados.\n\n" .
+                "## Secuencia recomendada\n\n" .
+                "Primero verifica prerrequisitos; luego trabaja procedimientos básicos; después incorpora problemas contextualizados; finalmente pide interpretación y comunicación del resultado.";
+        }
+
+        if ($key === 'investigacion') {
+            return "Para un curso de **{$label}**, puedes organizar actividades progresivas que lleven al estudiante desde la comprensión del problema hasta la elaboración de un producto académico.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Lectura guiada de artículos científicos**\n" .
+                "   - Evidencia: ficha de análisis con problema, objetivo, método, resultados y aporte.\n\n" .
+                "2. **Formulación del problema de investigación**\n" .
+                "   - Evidencia: matriz problema–pregunta–objetivo–justificación.\n\n" .
+                "3. **Búsqueda bibliográfica académica**\n" .
+                "   - Evidencia: matriz de antecedentes con autor, año, enfoque, método y hallazgos.\n\n" .
+                "4. **Construcción del marco teórico preliminar**\n" .
+                "   - Evidencia: mapa conceptual o síntesis argumentada con fuentes académicas.\n\n" .
+                "5. **Diseño metodológico**\n" .
+                "   - Evidencia: matriz con enfoque, diseño, población, muestra, técnicas e instrumentos.\n\n" .
+                "6. **Elaboración o adaptación de instrumentos**\n" .
+                "   - Evidencia: cuestionario, guía de entrevista, ficha de observación o rúbrica.\n\n" .
+                "7. **Revisión por pares del proyecto**\n" .
+                "   - Evidencia: lista de cotejo con observaciones y mejoras aplicadas.\n\n" .
+                "8. **Presentación del protocolo de investigación**\n" .
+                "   - Evidencia: documento final y sustentación breve.";
+        }
+
+        if ($key === 'comunicacion') {
+            return "Para un curso de **{$label}**, las actividades deben desarrollar comprensión lectora, producción escrita, argumentación y comunicación oral.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Lectura crítica de textos académicos**\n" .
+                "   - Evidencia: ficha con tesis, argumentos, evidencias y postura crítica.\n\n" .
+                "2. **Taller de escritura por etapas**\n" .
+                "   - Evidencia: borrador, revisión por pares y versión final.\n\n" .
+                "3. **Análisis de estructura textual**\n" .
+                "   - Evidencia: identificación de introducción, desarrollo, conclusión y conectores.\n\n" .
+                "4. **Debate académico breve**\n" .
+                "   - Evidencia: rúbrica de argumentación, claridad y respeto comunicativo.\n\n" .
+                "5. **Exposición oral con apoyo visual**\n" .
+                "   - Evidencia: presentación y autoevaluación.\n\n" .
+                "6. **Portafolio comunicativo**\n" .
+                "   - Evidencia: colección de textos revisados y reflexión de mejora.";
+        }
+
+        if ($key === 'programacion') {
+            return "Para un curso de **{$label}**, conviene trabajar con actividades prácticas, retos progresivos y productos funcionales.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Lectura y explicación de código**\n" .
+                "   - Evidencia: comentarios sobre flujo, variables, funciones y errores posibles.\n\n" .
+                "2. **Retos cortos de programación**\n" .
+                "   - Evidencia: solución funcional y explicación del algoritmo.\n\n" .
+                "3. **Depuración guiada**\n" .
+                "   - Evidencia: reporte de errores encontrados y correcciones aplicadas.\n\n" .
+                "4. **Mini proyecto por módulos**\n" .
+                "   - Evidencia: repositorio o entrega con funcionalidades incrementales.\n\n" .
+                "5. **Revisión por pares de código**\n" .
+                "   - Evidencia: checklist de legibilidad, funcionalidad y buenas prácticas.\n\n" .
+                "6. **Demostración final**\n" .
+                "   - Evidencia: producto ejecutable y sustentación técnica.";
+        }
+
+        if ($key === 'salud') {
+            return "Para un curso de **{$label}**, las actividades deben integrar fundamentos científicos, análisis de casos, práctica supervisada y criterio ético-profesional.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Análisis de caso clínico o comunitario**\n" .
+                "   - Evidencia: identificación del problema, factores asociados y propuesta de intervención.\n\n" .
+                "2. **Mapa conceptual de procesos o sistemas**\n" .
+                "   - Evidencia: representación organizada de conceptos clave y relaciones.\n\n" .
+                "3. **Simulación o práctica guiada**\n" .
+                "   - Evidencia: lista de cotejo de desempeño.\n\n" .
+                "4. **Revisión de evidencia científica**\n" .
+                "   - Evidencia: síntesis de fuente académica y aplicación al caso.\n\n" .
+                "5. **Diseño de intervención educativa o preventiva**\n" .
+                "   - Evidencia: plan breve con objetivo, población, actividad y evaluación.\n\n" .
+                "6. **Reflexión ética y de servicio**\n" .
+                "   - Evidencia: análisis breve sobre dignidad humana, responsabilidad profesional y servicio.";
+        }
+
+        return "Para **{$label}**, puedes diseñar actividades siguiendo una progresión didáctica clara: explorar, comprender, aplicar, producir y evaluar.\n\n" .
+            "## Actividades sugeridas\n\n" .
+            "1. **Diagnóstico inicial**\n" .
+            "   - Evidencia: cuestionario breve o actividad de saberes previos.\n\n" .
+            "2. **Lectura o recurso base guiado**\n" .
+            "   - Evidencia: ficha de ideas principales y preguntas de comprensión.\n\n" .
+            "3. **Análisis de caso o problema**\n" .
+            "   - Evidencia: solución argumentada o matriz de análisis.\n\n" .
+            "4. **Trabajo colaborativo aplicado**\n" .
+            "   - Evidencia: producto grupal con roles definidos.\n\n" .
+            "5. **Producto integrador**\n" .
+            "   - Evidencia: informe, presentación, proyecto, prototipo o propuesta.\n\n" .
+            "6. **Autoevaluación y coevaluación**\n" .
+            "   - Evidencia: rúbrica breve y reflexión de mejora.";
+    }
+
+
+
+    private function buildCurricularAdviceWithRagAndOllamaInline(string $question): string
+    {
+        $kind = $this->detectCurricularAdviceKindInline($question);
+        $artifactType = $this->artifactTypeForCurricularKindInline($kind);
+        $formatInstruction = $this->promptFormatForCurricularKindInline($kind);
+
+        $memoryCollection = 'jomelai_memory';
+        $knowledgeCollection = Support::config('jomelai_rag_collection') ?: 'jomelai_knowledge';
+        $model = Support::config('ollama_default_model') ?: (Support::config('ollama_model') ?: 'qwen2.5-coder:3b');
+
+        $memoryContext = '';
+        $knowledgeContext = '';
+        $memoryCount = 0;
+        $knowledgeCount = 0;
+
+        try {
+            $memory = (new DataEngineClient())->post('/memory/search', [
+                'query' => $question,
+                'collection' => $memoryCollection,
+                'n_results' => 5,
+            ]);
+
+            $items = $memory['results'] ?? [];
+            $chunks = [];
+
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    if (!is_array($item)) {
+                        continue;
+                    }
+
+                    $meta = $item['metadata'] ?? [];
+                    $itemArtifactType = is_array($meta) ? (string)($meta['artifact_type'] ?? '') : '';
+
+                    // Si hay tipo de artefacto, priorizar solo memoria del mismo tipo.
+                    if ($itemArtifactType !== '' && $itemArtifactType !== $artifactType) {
+                        continue;
+                    }
+
+                    $doc = trim((string)($item['document'] ?? ''));
+
+                    if ($doc !== '') {
+                        $chunks[] = mb_substr($doc, 0, 1600, 'UTF-8');
+                    }
+                }
+            }
+
+            $memoryCount = count($chunks);
+
+            if ($memoryCount > 0) {
+                $memoryContext = implode("
+
+---
+
+", array_slice($chunks, 0, 5));
+            }
+        } catch (Throwable $e) {
+            $memoryContext = '';
+            $memoryCount = 0;
+        }
+
+        try {
+            $rag = (new DataEngineClient())->post('/rag/search', [
+                'query' => $question,
+                'collection' => $knowledgeCollection,
+                'n_results' => 5,
+            ]);
+
+            $items = [];
+
+            if (isset($rag['results']) && is_array($rag['results'])) {
+                $items = $rag['results'];
+            } elseif (isset($rag['sources']) && is_array($rag['sources'])) {
+                $items = $rag['sources'];
+            } elseif (isset($rag['documents']) && is_array($rag['documents'])) {
+                $items = $rag['documents'];
+            }
+
+            $chunks = [];
+
+            foreach ($items as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                $txt = '';
+
+                foreach (['text', 'document', 'content', 'chunk', 'page_content'] as $key) {
+                    if (isset($item[$key]) && trim((string)$item[$key]) !== '') {
+                        $txt = trim((string)$item[$key]);
+                        break;
+                    }
+                }
+
+                if ($txt !== '') {
+                    $chunks[] = mb_substr($txt, 0, 1200, 'UTF-8');
+                }
+            }
+
+            $knowledgeCount = count($chunks);
+
+            if ($knowledgeCount > 0) {
+                $knowledgeContext = implode("
+
+---
+
+", array_slice($chunks, 0, 5));
+            }
+        } catch (Throwable $e) {
+            $knowledgeContext = '';
+            $knowledgeCount = 0;
+        }
+
+        $system = class_exists('CurriculumGuidelines')
+            ? CurriculumGuidelines::systemPrompt()
+            : 'Eres JoMelAI Curriculista UPeU. Responde con enfoque académico, pedagógico y curricular, usando lenguaje sobrio y compatible con una institución adventista.';
+
+        $memoryBlock = $memoryContext !== ''
+            ? "Memoria JoMelAI recuperada, priorízala si es pertinente:
+{$memoryContext}"
+            : "Memoria JoMelAI recuperada: sin coincidencias previas suficientes.";
+
+        $knowledgeBlock = $knowledgeContext !== ''
+            ? "Conocimiento institucional/RAG recuperado:
+{$knowledgeContext}"
+            : "Conocimiento institucional/RAG recuperado: no se encontró evidencia específica suficiente.";
+
+        $prompt =
+            $system . "
+
+" .
+            "Tarea:
+" .
+            "Responde como asesor curricular. No generes SQL. No digas que no encontraste contexto. " .
+            "Usa primero la memoria JoMelAI si es pertinente, luego el RAG institucional, y finalmente criterios pedagógicos generales. " .
+            "Si el usuario menciona un curso o área, adapta la propuesta a ese curso. " .
+            "Propón actividades, evidencias, secuencia didáctica y evaluación cuando corresponda. " .
+            "Evita respuestas genéricas excesivas. Usa Markdown claro.
+
+" .
+            "{$memoryBlock}
+
+" .
+            "{$knowledgeBlock}
+
+" .
+            "Solicitud del usuario:
+{$question}
+
+" .
+            "Formato sugerido:
+" .
+            "## Propuesta para el curso
+" .
+            "## Actividades sugeridas
+" .
+            "## Evidencias de aprendizaje
+" .
+            "## Secuencia recomendada
+" .
+            "## Evaluación sugerida
+";
+
+        try {
+            $ollama = (new OllamaClient())->generate($prompt, $model, [
+                'temperature' => 0.2,
+                'num_ctx' => 4096,
+                'num_predict' => 1000,
+            ]);
+
+            $answer = trim((string)($ollama['response'] ?? ''));
+            $normalized = Support::normalize($answer);
+
+            if (
+                $answer !== ''
+                && !str_contains($normalized, 'no encontre contexto suficiente')
+                && !str_contains($normalized, 'no encontré contexto suficiente')
+            ) {
+                $base = [];
+
+                if ($memoryCount > 0) {
+                    $base[] = 'memoria JoMelAI';
+                }
+
+                if ($knowledgeCount > 0) {
+                    $base[] = 'RAG institucional';
+                }
+
+                if (!$base) {
+                    $base[] = 'orientación generativa';
+                }
+
+                $answer .= "
+
+---
+
+**Base usada:** " . implode(' + ', $base) . ".";
+
+                $this->rememberCurricularAdviceInline($question, $answer, [
+                    'memory_count' => (string)$memoryCount,
+                    'knowledge_count' => (string)$knowledgeCount,
+                    'model' => $model,
+                ]);
+
+                return $answer;
+            }
+        } catch (Throwable $e) {
+            // Fallback abajo.
+        }
+
+        $fallback = ($kind === 'credit_grid') ? $this->buildCreditGridFallbackInline($question) : $this->buildGenericCurricularFallbackInline($question);
+
+        $this->rememberCurricularAdviceInline($question, $fallback, [
+            'memory_count' => (string)$memoryCount,
+            'knowledge_count' => (string)$knowledgeCount,
+            'model' => 'fallback',
+        ]);
+
+        return $fallback;
+    }
+
+
+
+
+
+
+
+
+
+
+    private function extractCourseTopicGenericInline(string $question): string
+    {
+        $patterns = [
+            '/curso\s+de\s+(.+)/iu',
+            '/asignatura\s+de\s+(.+)/iu',
+            '/materia\s+de\s+(.+)/iu',
+            '/actividades\s+para\s+un\s+curso\s+de\s+(.+)/iu',
+            '/actividades\s+para\s+(.+)/iu',
+            '/estrategias\s+para\s+(.+)/iu',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $question, $m)) {
+                $topic = trim((string)$m[1]);
+                $topic = preg_replace('/[?.!]+$/', '', $topic);
+                $topic = trim($topic);
+
+                if ($topic !== '') {
+                    return mb_convert_case($topic, MB_CASE_TITLE, 'UTF-8');
+                }
+            }
+        }
+
+        return 'El Curso Indicado';
+    }
+
+    private function buildGenericCurricularFallbackInline(string $question): string
+    {
+        $topic = $this->extractCourseTopicGenericInline($question);
+
+        return "Para **{$topic}**, puedes diseñar actividades progresivas sin depender de una lista fija de cursos.\n\n" .
+            "## Actividades sugeridas\n\n" .
+            "1. **Diagnóstico de saberes previos**\n" .
+            "   - Evidencia: cuestionario breve, caso inicial o resolución diagnóstica.\n\n" .
+            "2. **Exploración guiada de conceptos clave**\n" .
+            "   - Evidencia: ficha de comprensión, mapa conceptual o preguntas orientadoras.\n\n" .
+            "3. **Práctica dirigida**\n" .
+            "   - Evidencia: ejercicios, análisis de caso, guía de práctica o producto parcial.\n\n" .
+            "4. **Trabajo colaborativo aplicado**\n" .
+            "   - Evidencia: matriz grupal, informe breve, presentación o solución colaborativa.\n\n" .
+            "5. **Problema o caso contextualizado**\n" .
+            "   - Evidencia: solución argumentada, procedimiento, propuesta o análisis.\n\n" .
+            "6. **Producto integrador**\n" .
+            "   - Evidencia: informe, proyecto, portafolio, presentación, prototipo o sustentación.\n\n" .
+            "7. **Retroalimentación y mejora**\n" .
+            "   - Evidencia: versión mejorada del producto, autoevaluación y coevaluación.\n\n" .
+            "## Secuencia recomendada\n\n" .
+            "Diagnóstico → explicación guiada → práctica → aplicación contextualizada → producto integrador → retroalimentación.\n\n" .
+            "## Evaluación sugerida\n\n" .
+            "- Participación y preparación: 10%\n" .
+            "- Actividades prácticas: 30%\n" .
+            "- Producto integrador: 40%\n" .
+            "- Autoevaluación, coevaluación y mejora: 20%";
+    }
+
+    private function rememberCurricularAdviceInline(string $question, string $answer, array $metadata = []): void
+    {
+        $clean = trim($answer);
+        $normalized = Support::normalize($clean);
+
+        if ($clean === '' || mb_strlen($clean, 'UTF-8') < 350) {
+            return;
+        }
+
+        if (
+            str_contains($normalized, 'no encontre contexto suficiente')
+            || str_contains($normalized, 'no encontré contexto suficiente')
+            || str_contains($normalized, 'error')
+        ) {
+            return;
+        }
+
+        try {
+            (new DataEngineClient())->post('/memory/upsert', [
+                'question' => $question,
+                'answer' => $clean,
+                'collection' => 'jomelai_memory',
+                'intent' => 'curricular_advice',
+                'topic' => $this->extractCourseTopicGenericInline($question),
+                'artifact_type' => $artifactType ?? 'curricular_generated_answer',
+                'approved' => true,
+                'metadata' => $metadata,
+            ]);
+        } catch (Throwable $e) {
+            // La memoria no debe romper la respuesta principal.
+        }
+    }
+
+
+
+    private function detectCurricularAdviceKindInline(string $question): string
+    {
+        $q = Support::normalize($question);
+
+        $isCreditGrid = (
+            (
+                str_contains($q, 'distribuir')
+                || str_contains($q, 'repartir')
+                || str_contains($q, 'balancear')
+                || str_contains($q, 'organizar')
+                || str_contains($q, 'estructurar')
+                || str_contains($q, 'asignar')
+            )
+            && (
+                str_contains($q, 'credito')
+                || str_contains($q, 'creditos')
+                || str_contains($q, 'crédito')
+                || str_contains($q, 'créditos')
+            )
+            && (
+                str_contains($q, 'malla')
+                || str_contains($q, 'ciclo')
+                || str_contains($q, 'ciclos')
+                || str_contains($q, 'plan de estudios')
+                || str_contains($q, 'curricular')
+            )
+        );
+
+        if ($isCreditGrid) {
+            return 'credit_grid';
+        }
+
+        if (str_contains($q, 'verbo') || str_contains($q, 'resultado de aprendizaje') || str_contains($q, 'resultados de aprendizaje')) {
+            return 'learning_outcomes';
+        }
+
+        if (str_contains($q, 'alinear') || str_contains($q, 'perfil de egreso') || str_contains($q, 'perfil') || str_contains($q, 'egreso')) {
+            return 'curriculum_alignment';
+        }
+
+        if (str_contains($q, 'rubrica') || str_contains($q, 'rúbrica')) {
+            return 'rubric';
+        }
+
+        if (str_contains($q, 'semipresencial') || str_contains($q, 'ensenanza') || str_contains($q, 'enseñanza') || str_contains($q, 'estrategia')) {
+            return 'teaching_strategy';
+        }
+
+        return 'learning_activities';
+    }
+
+    private function artifactTypeForCurricularKindInline(string $kind): string
+    {
+        $map = [
+            'credit_grid' => 'curriculum_grid_credit_distribution',
+            'learning_outcomes' => 'learning_outcomes',
+            'curriculum_alignment' => 'curriculum_alignment',
+            'rubric' => 'rubric',
+            'teaching_strategy' => 'teaching_strategies',
+            'learning_activities' => 'learning_activities',
+        ];
+
+        return $map[$kind] ?? 'curricular_generated_answer';
+    }
+
+    private function promptFormatForCurricularKindInline(string $kind): string
+    {
+        if ($kind === 'credit_grid') {
+            return
+                "Formato obligatorio para esta respuesta:\n" .
+                "## Criterios para distribuir créditos\n" .
+                "## Propuesta de distribución por bloques o ciclos\n" .
+                "## Reglas de balance académico\n" .
+                "## Alertas curriculares\n" .
+                "## Ejemplo orientativo\n\n" .
+                "No respondas con actividades de aprendizaje, evidencias ni evaluación de un curso. La pregunta trata sobre diseño de malla curricular y distribución de créditos.";
+        }
+
+        if ($kind === 'learning_outcomes') {
+            return
+                "Formato obligatorio:\n" .
+                "## Criterios para elegir verbos\n" .
+                "## Verbos por nivel cognitivo\n" .
+                "## Fórmula para redactar resultados\n" .
+                "## Ejemplos aplicados\n" .
+                "## Errores a evitar";
+        }
+
+        if ($kind === 'curriculum_alignment') {
+            return
+                "Formato obligatorio:\n" .
+                "## Procedimiento de alineación curricular\n" .
+                "## Matriz perfil-competencia-curso-evidencia\n" .
+                "## Criterios de progresión\n" .
+                "## Alertas de consistencia\n" .
+                "## Ejemplo orientativo";
+        }
+
+        if ($kind === 'rubric') {
+            return
+                "Formato obligatorio:\n" .
+                "## Propósito de la rúbrica\n" .
+                "## Criterios de evaluación\n" .
+                "## Niveles de desempeño\n" .
+                "## Ponderación sugerida\n" .
+                "## Recomendaciones de uso";
+        }
+
+        if ($kind === 'teaching_strategy') {
+            return
+                "Formato obligatorio:\n" .
+                "## Estrategias didácticas recomendadas\n" .
+                "## Secuencia antes-durante-después\n" .
+                "## Evidencias de aprendizaje\n" .
+                "## Evaluación formativa\n" .
+                "## Recomendaciones operativas";
+        }
+
+        return
+            "Formato obligatorio:\n" .
+            "## Propuesta para el curso\n" .
+            "## Actividades sugeridas\n" .
+            "## Evidencias de aprendizaje\n" .
+            "## Secuencia recomendada\n" .
+            "## Evaluación sugerida";
+    }
+
+
+
+    private function buildCreditGridFallbackInline(string $question): string
+    {
+        return "## Criterios para distribuir créditos\n\n" .
+            "Para distribuir créditos en una malla de 10 ciclos, primero se define el total meta de créditos del programa y luego se organiza la progresión formativa por bloques.\n\n" .
+            "## Propuesta de distribución por bloques o ciclos\n\n" .
+            "| Bloque | Ciclos | Enfoque curricular | Créditos orientativos |\n" .
+            "|---|---:|---|---:|\n" .
+            "| Base universitaria | 1-2 | Formación general, comunicación, matemática, identidad institucional y vida saludable | 18-20 por ciclo |\n" .
+            "| Base disciplinar | 3-4 | Fundamentos de carrera, ciencias básicas, laboratorios o cursos introductorios | 19-21 por ciclo |\n" .
+            "| Especialidad progresiva | 5-7 | Cursos troncales, métodos profesionales, integración e investigación formativa | 20-22 por ciclo |\n" .
+            "| Profundización y práctica | 8-9 | Prácticas, proyectos, electivos o investigación aplicada | 18-22 por ciclo |\n" .
+            "| Cierre formativo | 10 | Internado, trabajo final, ética profesional, servicio o titulación | 16-20 créditos |\n\n" .
+            "## Reglas de balance académico\n\n" .
+            "- Evitar ciclos con carga excesiva frente a otros muy livianos.\n" .
+            "- Asegurar progresión: básico → disciplinar → especialidad → práctica/integración.\n" .
+            "- No concentrar demasiados cursos complejos en un mismo ciclo.\n" .
+            "- Vincular créditos con horas, resultados de aprendizaje, nivel de exigencia y evidencias.\n" .
+            "- Revisar coherencia entre prerrequisitos, competencias y perfil de egreso.\n\n" .
+            "## Alertas curriculares\n\n" .
+            "- No distribuir créditos solo por cantidad de cursos; revisar dificultad, horas y evidencias.\n" .
+            "- Validar créditos totales con normativa vigente e institucional.\n" .
+            "- Evitar que investigación, práctica o integración aparezcan solo al final sin progresión previa.\n\n" .
+            "## Ejemplo orientativo\n\n" .
+            "Si el programa tiene una meta cercana a 200 créditos, una distribución posible sería mantener la mayoría de ciclos entre 18 y 22 créditos, dejando el último ciclo ligeramente más flexible para práctica, internado, trabajo final o actividades de cierre.";
+    }
+
+
+}

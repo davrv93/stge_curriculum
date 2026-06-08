@@ -203,9 +203,9 @@ function jm_handle_ask_stream()
         jm_stream_json_response(['ok' => false, 'message' => 'Escribe tu pregunta.'], 422);
     }
 
-    $model = trim((string)($data['model'] ?? jm_stream_config('ollama_default_model', 'qwen2.5-coder:3b')));
+    $model = trim((string)($data['model'] ?? jm_stream_config('ollama_default_model', 'qwen2.5-coder:1.5b')));
     if ($model === '') {
-        $model = 'qwen2.5-coder:3b';
+        $model = 'qwen2.5-coder:1.5b';
     }
 
     $maxTokens = (int)($data['max_tokens'] ?? 700);
@@ -307,9 +307,9 @@ function jm_handle_syllabus_stream()
         jm_stream_json_response(['ok' => false, 'message' => 'El nombre del curso es obligatorio.'], 422);
     }
 
-    $model = trim((string)($data['model'] ?? jm_stream_config('ollama_default_model', 'qwen2.5-coder:3b')));
+    $model = trim((string)($data['model'] ?? jm_stream_config('ollama_default_model', 'qwen2.5-coder:1.5b')));
     if ($model === '') {
-        $model = 'qwen2.5-coder:3b';
+        $model = 'qwen2.5-coder:1.5b';
     }
 
     $program = trim((string)($data['program'] ?? ''));

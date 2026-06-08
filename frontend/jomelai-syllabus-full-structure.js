@@ -1,6 +1,6 @@
 /* JOMELAI_SYLLABUS_FULL_STRUCTURE_V1 */
 (function () {
-  const MODEL = 'qwen2.5-coder:3b';
+  const MODEL = 'qwen2.5-coder:1.5b';
 
   function id(x) { return document.getElementById(x); }
 

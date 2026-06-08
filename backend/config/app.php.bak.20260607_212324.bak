@@ -1,0 +1,23 @@
+<?php
+return [
+    'app_env' => getenv('APP_ENV') ?: 'local',
+    'app_secret' => getenv('APP_SECRET') ?: 'change-me-upeu-silabo-ai-2026',
+    'session_name' => getenv('SESSION_NAME') ?: 'UPEU_SILABO_AI_SESSION',
+    'ollama_base_url' => rtrim(getenv('OLLAMA_BASE_URL') ?: 'http://ollama:11434', '/'),
+    'ollama_default_model' => getenv('OLLAMA_DEFAULT_MODEL') ?: 'qwen2.5-coder:3b',
+    'ollama_http_timeout' => (int)(getenv('OLLAMA_HTTP_TIMEOUT') ?: 25),
+    'ollama_plan_timeout' => (int)(getenv('OLLAMA_PLAN_TIMEOUT') ?: 22),
+    'ollama_plan_ctx' => (int)(getenv('OLLAMA_PLAN_CTX') ?: 2048),
+    'ollama_plan_predict' => (int)(getenv('OLLAMA_PLAN_PREDICT') ?: 420),
+    'curriculum_cache_ttl_seconds' => (int)(getenv('CURRICULUM_CACHE_TTL_SECONDS') ?: 86400),
+    'data_engine_base_url' => rtrim(getenv('DATA_ENGINE_BASE_URL') ?: 'http://data-engine:8090', '/'),
+    'max_upload_mb' => (int)(getenv('MAX_UPLOAD_MB') ?: 2048),
+    'shared_csv_dir' => getenv('SHARED_CSV_DIR') ?: '/data/syllabi',
+    'default_csv_path' => getenv('DEFAULT_CSV_PATH') ?: '/data/syllabi/silabos.csv',
+    'default_csv_delimiter' => getenv('DEFAULT_CSV_DELIMITER') ?: ',',
+    'default_csv_chunk' => (int)(getenv('DEFAULT_CSV_CHUNK') ?: 1000),
+    'db_path' => __DIR__ . '/../storage/db/app.sqlite',
+    'session_path' => __DIR__ . '/../storage/sessions',
+    'upload_path' => __DIR__ . '/../storage/uploads',
+    'report_path' => __DIR__ . '/../storage/reports',
+];

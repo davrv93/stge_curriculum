@@ -4,7 +4,7 @@ return [
     'app_secret' => getenv('APP_SECRET') ?: 'change-me-upeu-silabo-ai-2026',
     'session_name' => getenv('SESSION_NAME') ?: 'UPEU_SILABO_AI_SESSION',
     'ollama_base_url' => rtrim(getenv('OLLAMA_BASE_URL') ?: 'http://ollama:11434', '/'),
-    'ollama_default_model' => getenv('OLLAMA_DEFAULT_MODEL') ?: 'qwen2.5-coder:3b',
+    'ollama_default_model' => getenv('OLLAMA_DEFAULT_MODEL') ?: 'qwen2.5-coder:1.5b',
     'ollama_http_timeout' => (int)(getenv('OLLAMA_HTTP_TIMEOUT') ?: 25),
     'ollama_plan_timeout' => (int)(getenv('OLLAMA_PLAN_TIMEOUT') ?: 22),
     'ollama_plan_ctx' => (int)(getenv('OLLAMA_PLAN_CTX') ?: 2048),

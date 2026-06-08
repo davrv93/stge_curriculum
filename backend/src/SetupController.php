@@ -23,7 +23,7 @@ final class SetupController
             'ollama' => $ollama,
             'default_csv_path' => Support::config('default_csv_path'),
             'recommended_models' => [
-                'qwen2.5-coder:3b',
+                'qwen2.5-coder:1.5b',
                 'deepseek-coder:1.5b',
                 'nomic-embed-text',
                 'qwen2.5-coder:7b'
@@ -35,7 +35,7 @@ final class SetupController
     {
         Support::requireAdmin();
         $data = Support::readJson();
-        $model = trim((string)($data['model'] ?? 'qwen2.5-coder:3b'));
+        $model = trim((string)($data['model'] ?? 'qwen2.5-coder:1.5b'));
         $res = (new DataEngineClient())->post('/jobs/ollama-pull', ['model' => $model]);
         Support::json($res, ($res['ok'] ?? false) ? 200 : 422);
     }

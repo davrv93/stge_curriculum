@@ -1,6 +1,6 @@
 /* JOMELAI_SYLLABUS_PRETTY_V6_LAYOUT_FIX */
 (function () {
-  const MODEL = 'qwen2.5-coder:3b';
+  const MODEL = 'qwen2.5-coder:1.5b';
 
   const STATE = window.JM_SYLLABUS_PRETTY_V6 = window.JM_SYLLABUS_PRETTY_V6 || {
     raw: '',

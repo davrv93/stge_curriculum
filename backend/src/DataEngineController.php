@@ -170,7 +170,7 @@ final class DataEngineController
 
         $model = trim((string)($data['model'] ?? Support::config('ollama_default_model')));
         if ($model === '' || str_contains($model, '0.5b')) {
-            $model = 'qwen2.5-coder:3b';
+            $model = 'qwen2.5-coder:1.5b';
         }
 
         $maxTokens = (int)($data['max_tokens'] ?? 420);
