@@ -1,0 +1,95 @@
+<?php
+/**
+ * JoMelAiController
+ * Entry point for the Motor JoMelAi unified endpoint.
+ * POST /api/ask  — main query endpoint (auth required)
+ * GET  /api/jomelai/audit  — audit log (admin only)
+ * GET  /api/jomelai/stats  — audit stats (admin only)
+ */
+final class JoMelAiController
+{
+    public function ask(): void
+    {
+        $user = Support::requireAuth();
+        $data = Support::readJson();
+
+        $question = trim((string)($data['question'] ?? ''));
+        $context  = trim((string)($data['context']  ?? 'user'));
+        $opts     = (array)($data['options'] ?? []);
+        $includeDebug = (bool)($opts['include_debug'] ?? false);
+        $isAdmin  = ($user['role'] ?? '') === 'admin';
+
+        if ($question === '') {
+            Support::json(['ok' => false, 'message' => 'La pregunta no puede estar vacía.'], 400);
+            return;
+        }
+        if (mb_strlen($question, 'UTF-8') > 2000) {
+            Support::json(['ok' => false, 'message' => 'La pregunta no debe superar los 2000 caracteres.'], 400);
+            return;
+        }
+
+        $startMs = (int)(microtime(true) * 1000);
+
+        try {
+            $classifier   = new JoMelAiIntentClassifier();
+            $intentResult = $classifier->classify($question);
+
+            $orchestrator = new JoMelAiOrchestrator();
+            $engineResult = $orchestrator->execute($intentResult, $question, $opts);
+
+            $formatter    = new JoMelAiResponseFormatter();
+            $response     = $formatter->format($intentResult, $engineResult, $includeDebug, $isAdmin);
+
+        } catch (Throwable $e) {
+            $durationMs = (int)(microtime(true) * 1000) - $startMs;
+            Support::json([
+                'ok'             => false,
+                'intent'         => 'unknown',
+                'visible_intent' => 'Error',
+                'message'        => 'Ocurrió un error al procesar tu solicitud. Inténtalo nuevamente.',
+                'summary'        => '',
+                'answer'         => '',
+                'chart_url'      => null,
+                'data_url'       => null,
+                'table'          => null,
+                'evidence'       => [],
+                'actions'        => [],
+                'suggestions'    => [],
+                'debug'          => $isAdmin && $includeDebug
+                    ? ['error' => $e->getMessage(), 'duration_ms' => $durationMs]
+                    : null,
+            ], 500);
+            return;
+        }
+
+        $durationMs = (int)(microtime(true) * 1000) - $startMs;
+        $response['_duration_ms'] = $durationMs;        // may be used by debug block
+
+        // Persist audit record (non-blocking best-effort)
+        try {
+            $engineResult['_duration_ms'] = $durationMs;
+            (new JoMelAiAuditService())->log($user, $question, $intentResult, $engineResult, $durationMs);
+        } catch (Throwable) {
+            // Audit failure must not break the main response
+        }
+
+        unset($response['_duration_ms']);
+        Support::json($response);
+    }
+
+    public function auditLog(): void
+    {
+        Support::requireAdmin();
+        $limit  = min((int)($_GET['limit']  ?? 100), 500);
+        $offset = max((int)($_GET['offset'] ?? 0),   0);
+        $rows   = (new JoMelAiAuditService())->getLog($limit, $offset);
+        Support::json(['ok' => true, 'rows' => $rows, 'limit' => $limit, 'offset' => $offset]);
+    }
+
+    public function auditStats(): void
+    {
+        Support::requireAdmin();
+        $stats = (new JoMelAiAuditService())->getStats();
+        Support::json(['ok' => true, 'stats' => $stats]);
+    }
+}

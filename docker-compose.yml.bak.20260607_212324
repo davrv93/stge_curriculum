@@ -1,0 +1,105 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════
+#  JoMelAi Curriculista — Stack completo con datos persistentes
+#
+#  ⚠️  DATOS EN DISCO (bind mounts → carpeta ./data/)
+#  Un "docker compose down -v" o rebuild NO borra nada.
+#
+#  Servicios:
+#    frontend    → http://localhost:3000  (Nginx + SPA curriculista)
+#    backend     → interno :8080          (PHP 8.2 + SQLite)
+#    data-engine → interno :8090          (DuckDB + RAG + análisis)
+#    ollama      → interno :11434         (Motor LLM)
+# ══════════════════════════════════════════════════════════════
+
+services:
+  # ── Frontend SPA (nginx:alpine sirve el index.html directamente) ──
+  frontend:
+    build:
+      context: ./frontend
+    image: jomelai-frontend:latest
+    container_name: jomelai_frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
+    networks:
+      - jomelai_net
+    restart: unless-stopped
+
+  # ── Backend PHP ───────────────────────────────────────────
+  backend:
+    image: jome-backend:latest
+    container_name: jomelai_backend
+    expose:
+      - "8080"
+    volumes:
+      - ./data/backend/storage:/var/www/app/storage
+      - ./data/syllabi:/data/syllabi
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      APP_SECRET: ${APP_SECRET:-change-me-jomelai-2026}
+      SESSION_NAME: JOMELAI_SESSION
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:3b}
+      DATA_ENGINE_BASE_URL: http://data-engine:8090
+      MAX_UPLOAD_MB: 2048
+      SHARED_CSV_DIR: /data/syllabi
+      DEFAULT_CSV_PATH: /data/syllabi/silabos.csv
+      DEFAULT_CSV_DELIMITER: ","
+      DEFAULT_CSV_CHUNK: 1000
+    networks:
+      - jomelai_net
+    restart: unless-stopped
+    depends_on:
+      - data-engine
+
+  # ── Data Engine (DuckDB + RAG) ────────────────────────────
+  data-engine:
+    build:
+      context: ./data-engine
+    image: jomeai-data-engine:latest
+    container_name: jomelai_data_engine
+    expose:
+      - "8090"
+    volumes:
+      - ./data/duckdb:/data/duckdb
+      - ./data/syllabi:/data/syllabi
+    environment:
+      DUCKDB_PATH: /data/duckdb/jomelai.duckdb
+      SYLLABI_DIR: /data/syllabi
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:3b}
+      PORT: 8090
+      PYTHONPATH: /app
+    networks:
+      - jomelai_net
+    restart: unless-stopped
+    depends_on:
+      - ollama
+
+  # ── Ollama LLM ────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: jomelai_ollama
+    expose:
+      - "11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    networks:
+      - jomelai_net
+    restart: unless-stopped
+    # GPU NVIDIA (descomenta si aplica):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+networks:
+  jomelai_net:
+    driver: bridge
+    name: jomelai_network

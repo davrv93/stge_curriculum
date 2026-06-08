@@ -1,0 +1,426 @@
+<?php
+/* JOMELAI_STREAM_ROUTES_V1
+   Rutas reales:
+   - POST /api/ask-stream
+   - POST /api/assistant/generate-syllabus-stream
+*/
+
+function jm_stream_path()
+{
+    return parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+}
+
+function jm_stream_method()
+{
+    return strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+}
+
+function jm_stream_json_response($payload, $status = 200)
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+function jm_stream_read_json()
+{
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw ?: '{}', true);
+    return is_array($data) ? $data : [];
+}
+
+function jm_stream_auth_unlock()
+{
+    if (class_exists('Support')) {
+        try {
+            Support::requireAuth();
+        } catch (Throwable $e) {
+            jm_stream_json_response([
+                'ok' => false,
+                'message' => 'No autorizado.',
+                'detail' => $e->getMessage(),
+            ], 401);
+        }
+    }
+
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+}
+
+function jm_stream_config($key, $default = null)
+{
+    if (class_exists('Support')) {
+        try {
+            $value = Support::config($key);
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+        } catch (Throwable $e) {
+            // fallback abajo
+        }
+    }
+
+    $env = getenv(strtoupper($key));
+    return ($env !== false && $env !== '') ? $env : $default;
+}
+
+function jm_ollama_base_url()
+{
+    $base = jm_stream_config('ollama_base_url', '');
+    if ($base === '') {
+        $base = getenv('OLLAMA_BASE_URL') ?: '';
+    }
+    if ($base === '') {
+        $base = 'http://jomelai_ollama:11434';
+    }
+    return rtrim($base, '/');
+}
+
+function jm_sse_start()
+{
+    ignore_user_abort(true);
+    @set_time_limit(0);
+
+    while (ob_get_level() > 0) {
+        @ob_end_flush();
+    }
+
+    @ini_set('output_buffering', 'off');
+    @ini_set('zlib.output_compression', '0');
+    @ini_set('implicit_flush', '1');
+    @ob_implicit_flush(true);
+
+    header('Content-Type: text/event-stream; charset=utf-8');
+    header('Cache-Control: no-cache, no-transform');
+    header('Connection: keep-alive');
+    header('X-Accel-Buffering: no');
+    header('Content-Encoding: none');
+
+    echo ':' . str_repeat(' ', 4096) . "\n\n";
+    echo "event: ready\n";
+    echo 'data: ' . json_encode(['ok' => true], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+
+    @ob_flush();
+    @flush();
+}
+
+function jm_sse_send($event, $data)
+{
+    echo "event: {$event}\n";
+    echo 'data: ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+    @ob_flush();
+    @flush();
+}
+
+function jm_ollama_stream_generate($model, $prompt, $options, $onToken)
+{
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('La extension curl de PHP no esta disponible.');
+    }
+
+    $payload = [
+        'model' => $model,
+        'prompt' => $prompt,
+        'stream' => true,
+        'options' => $options,
+    ];
+
+    $base = jm_ollama_base_url();
+    $ch = curl_init($base . '/api/generate');
+
+    $buffer = '';
+    $answer = '';
+
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        CURLOPT_RETURNTRANSFER => false,
+        CURLOPT_HEADER => false,
+        CURLOPT_TIMEOUT => 0,
+        CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$buffer, &$answer, $onToken) {
+            $buffer .= $chunk;
+
+            while (($pos = strpos($buffer, "\n")) !== false) {
+                $line = trim(substr($buffer, 0, $pos));
+                $buffer = substr($buffer, $pos + 1);
+
+                if ($line === '') {
+                    continue;
+                }
+
+                $json = json_decode($line, true);
+
+                if (!is_array($json)) {
+                    continue;
+                }
+
+                $piece = (string)($json['response'] ?? '');
+
+                if ($piece !== '') {
+                    $answer .= $piece;
+                    $onToken($piece);
+                }
+            }
+
+            return strlen($chunk);
+        },
+    ]);
+
+    $ok = curl_exec($ch);
+
+    if ($ok === false) {
+        $error = curl_error($ch);
+        curl_close($ch);
+        throw new RuntimeException('Error conectando con Ollama: ' . $error);
+    }
+
+    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($status < 200 || $status >= 300) {
+        throw new RuntimeException('Ollama respondio HTTP ' . $status);
+    }
+
+    return $answer;
+}
+
+function jm_handle_ask_stream()
+{
+    if (jm_stream_method() !== 'POST') {
+        jm_stream_json_response(['ok' => false, 'message' => 'Metodo no permitido.'], 405);
+    }
+
+    jm_stream_auth_unlock();
+
+    $data = jm_stream_read_json();
+
+    $question = trim((string)($data['question'] ?? ''));
+
+    if ($question === '') {
+        jm_stream_json_response(['ok' => false, 'message' => 'Escribe tu pregunta.'], 422);
+    }
+
+    $model = trim((string)($data['model'] ?? jm_stream_config('ollama_default_model', 'qwen2.5-coder:3b')));
+    if ($model === '') {
+        $model = 'qwen2.5-coder:3b';
+    }
+
+    $maxTokens = (int)($data['max_tokens'] ?? 700);
+    $maxTokens = max(120, min($maxTokens, 1800));
+
+    $numCtx = (int)($data['num_ctx'] ?? 2048);
+    $numCtx = max(1024, min($numCtx, 3072));
+
+    $nResults = (int)($data['n_results'] ?? 0);
+    $nResults = max(0, min($nResults, 4));
+
+    $temperature = (float)($data['temperature'] ?? 0.22);
+    $temperature = max(0.05, min($temperature, 0.8));
+
+    $topP = (float)($data['top_p'] ?? 0.85);
+    $topP = max(0.3, min($topP, 0.95));
+
+    $context = trim((string)($data['context'] ?? 'chat'));
+
+    $tokensConfig = [
+        'model' => $model,
+        'num_ctx' => $numCtx,
+        'num_predict' => $maxTokens,
+        'n_results' => $nResults,
+        'temperature' => $temperature,
+        'top_p' => $topP,
+        'stream' => true,
+    ];
+
+    $prompt =
+        "Eres JoMelAi, asistente curricular universitario. Responde en español, con tono academico sobrio, claro y util.\n" .
+        "No inventes datos institucionales especificos si no fueron proporcionados.\n" .
+        "Si el usuario pide un recurso de aprendizaje, entrega un documento estructurado, editable y completo.\n" .
+        "Si la solicitud es una continuacion, devuelve solo contenido nuevo y evita repetir secciones ya dadas.\n\n" .
+        "CONTEXTO UI: {$context}\n\n" .
+        "SOLICITUD DEL USUARIO:\n{$question}\n\n" .
+        "RESPUESTA:";
+
+    jm_sse_start();
+    jm_sse_send('config', [
+        'ok' => true,
+        'tokens_config' => $tokensConfig,
+        'message' => "Modelo {$model}, ctx {$numCtx}, salida {$maxTokens} tokens.",
+    ]);
+
+    $answer = '';
+
+    try {
+        $answer = jm_ollama_stream_generate(
+            $model,
+            $prompt,
+            [
+                'temperature' => $temperature,
+                'top_p' => $topP,
+                'repeat_penalty' => 1.08,
+                'num_ctx' => $numCtx,
+                'num_predict' => $maxTokens,
+                'num_thread' => 4,
+            ],
+            function ($piece) {
+                jm_sse_send('token', ['text' => $piece]);
+            }
+        );
+    } catch (Throwable $e) {
+        jm_sse_send('token', ['text' => "\n\n⚠️ " . $e->getMessage()]);
+        jm_sse_send('final', [
+            'ok' => false,
+            'mode' => 'ask_stream',
+            'answer' => $answer,
+            'message' => $e->getMessage(),
+            'tokens_config' => $tokensConfig,
+        ]);
+        exit;
+    }
+
+    jm_sse_send('final', [
+        'ok' => true,
+        'mode' => 'ask_stream',
+        'answer' => $answer,
+        'tokens_config' => $tokensConfig,
+    ]);
+
+    exit;
+}
+
+function jm_handle_syllabus_stream()
+{
+    if (jm_stream_method() !== 'POST') {
+        jm_stream_json_response(['ok' => false, 'message' => 'Metodo no permitido.'], 405);
+    }
+
+    jm_stream_auth_unlock();
+
+    $data = jm_stream_read_json();
+
+    $course = trim((string)($data['course'] ?? ''));
+
+    if ($course === '') {
+        jm_stream_json_response(['ok' => false, 'message' => 'El nombre del curso es obligatorio.'], 422);
+    }
+
+    $model = trim((string)($data['model'] ?? jm_stream_config('ollama_default_model', 'qwen2.5-coder:3b')));
+    if ($model === '') {
+        $model = 'qwen2.5-coder:3b';
+    }
+
+    $program = trim((string)($data['program'] ?? ''));
+    $credits = trim((string)($data['credits'] ?? ''));
+    $cycle = trim((string)($data['cycle'] ?? ''));
+    $weeks = trim((string)($data['weeks'] ?? '16'));
+    $modality = trim((string)($data['modality'] ?? 'Presencial'));
+    $profile = trim((string)($data['graduate_profile'] ?? ''));
+    $competency = trim((string)($data['competency'] ?? ''));
+
+    $maxTokens = (int)($data['max_tokens'] ?? 1500);
+    $maxTokens = max(700, min($maxTokens, 2200));
+
+    $numCtx = (int)($data['num_ctx'] ?? 2048);
+    $numCtx = max(1024, min($numCtx, 3072));
+
+    $temperature = (float)($data['temperature'] ?? 0.22);
+
+    $tokensConfig = [
+        'model' => $model,
+        'num_ctx' => $numCtx,
+        'num_predict' => $maxTokens,
+        'n_results' => 0,
+        'temperature' => $temperature,
+        'top_p' => 0.85,
+        'stream' => true,
+    ];
+
+    $prompt =
+        "Eres un disenador curricular universitario experto.\n\n" .
+        "Genera contenido REAL y especifico para un silabo universitario.\n" .
+        "Responde SOLO JSON valido. No uses Markdown. No uses placeholders.\n" .
+        "No uses textos como \"titulo 1\", \"contenido 1\", \"referencia 1\", \"descripcion especifica\", \"autor 1\" o \"url 1\".\n\n" .
+        "ASIGNATURA: {$course}\n" .
+        "PROGRAMA: {$program}\n" .
+        "CREDITOS: {$credits}\n" .
+        "CICLO: {$cycle}\n" .
+        "SEMANAS: {$weeks}\n" .
+        "MODALIDAD: {$modality}\n" .
+        "PERFIL DE EGRESO/APORTE: {$profile}\n" .
+        "COMPETENCIA ESPERADA: {$competency}\n\n" .
+        "El JSON debe tener exactamente estas claves principales:\n" .
+        "{\n" .
+        "  \"sumilla\": \"sumilla real de 100 a 140 palabras\",\n" .
+        "  \"competencia_curso\": \"competencia observable especifica de la asignatura\",\n" .
+        "  \"resultados_curso\": [\"4 resultados reales\"],\n" .
+        "  \"unidades\": [\n" .
+        "    {\"unidad\": 1, \"titulo\": \"titulo real\", \"resultado\": \"resultado real\", \"contenidos\": [\"4 contenidos reales\"], \"producto\": \"producto real\"}\n" .
+        "  ],\n" .
+        "  \"metodologias\": [\"4 metodologias reales\"],\n" .
+        "  \"referencias\": [{\"autor\":\"autor real o institucion\", \"anio\":\"anio\", \"titulo\":\"titulo real\", \"fuente\":\"editorial, revista o institucion\", \"url\":\"URL real o DOI no identificado\", \"utilidad\":\"utilidad para el curso\"}],\n" .
+        "  \"enlaces\": [{\"titulo\":\"recurso real\", \"url\":\"URL real\", \"uso\":\"uso academico\"}]\n" .
+        "}\n\n" .
+        "Cantidad obligatoria: 4 resultados_curso, 4 unidades, 4 contenidos por unidad, 4 metodologias, 5 referencias y 4 enlaces.\n" .
+        "Ahora genera el JSON real para la asignatura {$course}.";
+
+    jm_sse_start();
+    jm_sse_send('config', [
+        'ok' => true,
+        'tokens_config' => $tokensConfig,
+        'message' => "Generando silabo con {$model}.",
+    ]);
+
+    $answer = '';
+
+    try {
+        $answer = jm_ollama_stream_generate(
+            $model,
+            $prompt,
+            [
+                'temperature' => $temperature,
+                'top_p' => 0.85,
+                'repeat_penalty' => 1.08,
+                'num_ctx' => $numCtx,
+                'num_predict' => $maxTokens,
+                'num_thread' => 4,
+            ],
+            function ($piece) {
+                jm_sse_send('token', ['text' => $piece]);
+            }
+        );
+    } catch (Throwable $e) {
+        jm_sse_send('token', ['text' => "\n\n⚠️ " . $e->getMessage()]);
+        jm_sse_send('final', [
+            'ok' => false,
+            'mode' => 'syllabus_stream',
+            'response' => $answer,
+            'message' => $e->getMessage(),
+            'tokens_config' => $tokensConfig,
+        ]);
+        exit;
+    }
+
+    jm_sse_send('final', [
+        'ok' => true,
+        'mode' => 'syllabus_stream',
+        'model' => $model,
+        'response' => $answer,
+        'answer' => $answer,
+        'tokens_config' => $tokensConfig,
+    ]);
+
+    exit;
+}
+
+$__jm_path = jm_stream_path();
+
+if ($__jm_path === '/api/ask-stream') {
+    jm_handle_ask_stream();
+}
+
+if ($__jm_path === '/api/assistant/generate-syllabus-stream') {
+    jm_handle_syllabus_stream();
+}

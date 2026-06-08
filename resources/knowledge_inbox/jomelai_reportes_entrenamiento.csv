@@ -1,0 +1,301 @@
+id,question,intent,chart_type,table,dimension,metric_or_operation,filters
+1,¿Cuántos cursos hay por facultad?,count,bar,silabos,facultad,COUNT,
+2,Cantidad de sílabos por programa de estudio,count,bar,silabos,programa_estudio,COUNT,
+3,Cuántos cursos existen por sede,count,bar,silabos,sede,COUNT,
+4,Conteo de asignaturas por modalidad,count,pie,silabos,modalidad_estudio,COUNT,
+5,Distribución de cursos por ciclo,count,bar,silabos,ciclo,COUNT,
+6,Cuántos cursos hay en total,count,,silabos,,COUNT,
+7,Número de sílabos registrados,count,,silabos,,COUNT,
+8,Total de asignaturas por área de formación,count,bar,malla_curricular,area_formacion,COUNT,
+9,Cuántos cursos por tipo de curso,count,pie,malla_curricular,tipo_curso,COUNT,
+10,Cantidad de materias por naturaleza de curso,count,bar,malla_curricular,naturaleza_curso,COUNT,
+11,Distribución de cursos por facultad en Lima,count,bar,silabos,facultad,COUNT,sede=Lima
+12,Cuántos sílabos hay en Juliaca,count,bar,silabos,programa_estudio,COUNT,sede=Juliaca
+13,Conteo de cursos por programa en Tarapoto,count,bar,silabos,programa_estudio,COUNT,sede=Tarapoto
+14,Cuántos cursos hay en modalidad presencial,count,bar,silabos,facultad,COUNT,modalidad=presencial
+15,Cantidad de asignaturas semipresenciales,count,bar,silabos,programa_estudio,COUNT,modalidad=semipresencial
+16,Cuántos cursos virtuales hay por facultad,count,bar,silabos,facultad,COUNT,modalidad=virtual
+17,Distribución de cursos por ciclo en Ingeniería de Sistemas,count,bar,silabos,ciclo,COUNT,programa=Sistemas
+18,Cuántas asignaturas tiene Enfermería,count,,silabos,,COUNT,programa=Enfermeria
+19,Conteo de cursos de Administración por ciclo,count,bar,silabos,ciclo,COUNT,programa=Administracion
+20,Cuántos sílabos tiene la facultad de Teología,count,,silabos,,COUNT,facultad=Teologia
+21,Total de créditos por programa de estudio,aggregate,bar,plan_estudios,programa_estudio,SUM(total_creditos),
+22,Promedio de créditos por ciclo,aggregate,bar,malla_curricular,ciclo,AVG(creditos),
+23,Suma de horas teóricas por facultad,aggregate,bar,silabos,facultad,SUM(horas_teoricas),
+24,Total de horas prácticas por programa,aggregate,bar,silabos,programa_estudio,SUM(horas_practicas),
+25,Promedio de créditos por área de formación,aggregate,bar,malla_curricular,area_formacion,AVG(creditos),
+26,Carga horaria total por sede,aggregate,bar,silabos,sede,SUM(horas_totales),
+27,Máximo de créditos por curso en Sistemas,aggregate,,malla_curricular,,MAX(creditos),programa=Sistemas
+28,Mínimo de horas teóricas por programa,aggregate,bar,silabos,programa_estudio,MIN(horas_teoricas),
+29,Promedio de horas de clase por modalidad,aggregate,bar,silabos,modalidad_estudio,AVG(horas_totales),
+30,Total de créditos acumulados por facultad,aggregate,bar,plan_estudios,facultad,SUM(total_creditos),
+31,Ranking de programas con más créditos,ranking,horizontal_bar,plan_estudios,programa_estudio,SUM(total_creditos),
+32,Top 10 cursos con mayor carga horaria,ranking,horizontal_bar,silabos,curso,SUM(horas_totales),
+33,Programas con más cursos en la malla,ranking,horizontal_bar,malla_curricular,programa_estudio,COUNT,
+34,Top 5 facultades con más asignaturas,ranking,horizontal_bar,silabos,facultad,COUNT,
+35,Cursos con más horas prácticas,ranking,horizontal_bar,silabos,curso,SUM(horas_practicas),
+36,Ranking de sedes por cantidad de sílabos,ranking,horizontal_bar,silabos,sede,COUNT,
+37,Top programas con mayor promedio de créditos,ranking,horizontal_bar,malla_curricular,programa_estudio,AVG(creditos),
+38,Cursos con menos créditos asignados,ranking,horizontal_bar,malla_curricular,curso,MIN(creditos),
+39,Top 10 programas por total de horas,ranking,horizontal_bar,silabos,programa_estudio,SUM(horas_totales),
+40,Ranking de áreas de formación por créditos,ranking,horizontal_bar,malla_curricular,area_formacion,SUM(creditos),
+41,Hazme un gráfico de barras de cursos por facultad,chart,bar,silabos,facultad,COUNT,
+42,Muéstrame un pie de modalidades de estudio,chart,pie,silabos,modalidad_estudio,COUNT,
+43,Visualiza la distribución de créditos por ciclo,chart,bar,malla_curricular,ciclo,SUM(creditos),
+44,Gráfico de línea de cursos por periodo,chart,line,plan_estudios,periodo_inicio,COUNT,
+45,Gráfica de dispersión créditos vs horas de clase,chart,scatter,silabos,,creditos vs horas_totales,
+46,Diagrama de barras horizontales por programa,chart,horizontal_bar,silabos,programa_estudio,COUNT,
+47,Pastel de distribución por sede,chart,pie,silabos,sede,COUNT,
+48,Visualizar horas teóricas vs horas prácticas,chart,scatter,silabos,,horas_teoricas vs horas_practicas,
+49,Histograma de créditos,chart,histogram,malla_curricular,,creditos,
+50,Mapa de calor cursos por programa y ciclo,chart,heatmap,malla_curricular,programa_estudio-ciclo,COUNT,
+51,Lista de cursos de Enfermería,list,,silabos,curso,,programa=Enfermeria
+52,Dame los sílabos de Ingeniería de Sistemas,list,,silabos,,,programa=Sistemas
+53,Mostrar todos los cursos del ciclo 5,list,,malla_curricular,,,ciclo=5
+54,Ver asignaturas de la sede Lima,list,,silabos,,,sede=Lima
+55,Listar cursos obligatorios,list,,malla_curricular,,,tipo_curso=obligatorio
+56,Dame los recursos de aprendizaje de Estadística,list,,recurso_aprendizaje,,,curso=Estadistica
+57,Mostrar bibliografía del curso Cálculo,list,,recurso_aprendizaje,,,curso=Calculo
+58,Lista de URLs de recursos por programa,list,,recurso_aprendizaje,url_recurso,,
+59,Cursos electivos por facultad de Ingeniería,list,,malla_curricular,,,facultad=Ingenieria
+60,Listar planes de estudio activos,list,,plan_estudios,,,estado=activo
+61,Cursos por área de formación básica,count,bar,malla_curricular,programa_estudio,COUNT,area_formacion=basica
+62,Asignaturas de formación general por ciclo,count,bar,malla_curricular,ciclo,COUNT,area_formacion=general
+63,Distribución de cursos especializados por programa,count,bar,malla_curricular,programa_estudio,COUNT,area_formacion=especialidad
+64,Cuántos cursos de práctica profesional hay,count,,malla_curricular,,COUNT,tipo_curso=practica
+65,Total de electivos por sede,count,bar,malla_curricular,sede,COUNT,tipo_curso=electivo
+66,Planes de estudio vigentes por programa,count,bar,plan_estudios,programa_estudio,COUNT,estado=vigente
+67,Cuántas versiones de plan tiene cada programa,count,bar,plan_estudios,programa_estudio,COUNT(version_plan),
+68,Distribución de planes por nivel académico,count,pie,plan_estudios,nivel_academico,COUNT,
+69,Cuántos planes hay por grado académico,count,bar,plan_estudios,grado_academico,COUNT,
+70,Total de ciclos por programa en el plan,aggregate,bar,plan_estudios,programa_estudio,MAX(total_ciclos),
+71,Recursos bibliográficos por tipo,count,pie,recurso_aprendizaje,tipo_recurso,COUNT,
+72,Cuántos recursos hay por curso,count,bar,recurso_aprendizaje,curso,COUNT,
+73,Total de recursos por programa de estudio,count,bar,recurso_aprendizaje,programa_estudio,COUNT,
+74,Recursos obligatorios vs opcionales,count,pie,recurso_aprendizaje,obligatorio,COUNT,
+75,Distribución de recursos por idioma,count,pie,recurso_aprendizaje,idioma,COUNT,
+76,Cuántos recursos web hay por ciclo,count,bar,recurso_aprendizaje,ciclo,COUNT,tipo=url
+77,Libros de texto por programa,count,bar,recurso_aprendizaje,programa_estudio,COUNT,tipo_recurso=libro
+78,Recursos digitales por facultad,count,bar,recurso_aprendizaje,curso,COUNT,formato=digital
+79,Cuántos artículos científicos hay registrados,count,,recurso_aprendizaje,,COUNT,tipo_recurso=articulo
+80,Recursos por unidad del curso Metodología,list,,recurso_aprendizaje,,,curso=Metodologia
+81,Evidencias pendientes del formato C1,count,bar,sunedu_evidencia_curricular,programa_estudio,COUNT,codigo_formato=C1&estado=pendiente
+82,Ítems sin evidencia para C2,list,,sunedu_formato_item,,,codigo_formato=C2
+83,Cumplimiento SUNEDU por sede,count,bar,sunedu_evidencia_curricular,sede,COUNT,estado=validado
+84,Requisitos pendientes por facultad,count,bar,sunedu_evidencia_curricular,facultad,COUNT,estado=pendiente
+85,Evidencias observadas por programa,count,bar,sunedu_evidencia_curricular,programa_estudio,COUNT,estado=observado
+86,Cuántos ítems tiene el formato C1,count,,sunedu_formato_item,,COUNT,codigo_formato=C1
+87,Distribución de evidencias por estado de validación,count,pie,sunedu_evidencia_curricular,estado_validacion,COUNT,
+88,Ítems obligatorios de C2 por componente,count,bar,sunedu_formato_item,componente,COUNT,codigo_formato=C2&obligatorio=si
+89,Evidencias validadas por sede,count,bar,sunedu_evidencia_curricular,sede,COUNT,estado=validado
+90,Requisitos SUNEDU por condición básica,count,bar,sunedu_formato_item,condicion_basica,COUNT,
+91,cuantos cursos hay por carrera,count,bar,silabos,programa_estudio,COUNT,
+92,cantida de silabos por faculta,count,bar,silabos,facultad,COUNT,
+93,conte de cursos por modalida,count,bar,silabos,modalidad_estudio,COUNT,
+94,cuantos hay en juliaka,count,bar,silabos,programa_estudio,COUNT,sede=Juliaca
+95,distribucion por carrera en lima,count,bar,silabos,programa_estudio,COUNT,sede=Lima
+96,cuanto creditaje tiene sistemas,aggregate,,plan_estudios,,SUM(total_creditos),programa=Sistemas
+97,promedio de credtos por facultad,aggregate,bar,silabos,facultad,AVG(creditos),
+98,grafco de barras por facultad,chart,bar,silabos,facultad,COUNT,
+99,pastel de modalidaes,chart,pie,silabos,modalidad_estudio,COUNT,
+100,ranking de prograamas con mas creditos,ranking,horizontal_bar,plan_estudios,programa_estudio,SUM(total_creditos),
+101,mapa de calor programa vs ciclo,chart,heatmap,malla_curricular,programa_estudio-ciclo,COUNT,
+102,dispercion creditos vs horas,chart,scatter,silabos,,creditos vs horas_totales,
+103,histograma de creditos,chart,histogram,malla_curricular,,creditos,
+104,evolucion de planes por periodo,chart,line,plan_estudios,periodo_inicio,COUNT,
+105,top 10 cursos mas pesados,ranking,horizontal_bar,malla_curricular,curso,MAX(creditos),
+106,Cuántos cursos tiene cada ciclo en Administración,count,bar,malla_curricular,ciclo,COUNT,programa=Administracion
+107,Total de horas por ciclo en Enfermería,aggregate,bar,malla_curricular,ciclo,SUM(horas_totales),programa=Enfermeria
+108,Promedio de créditos por ciclo en Sistemas,aggregate,bar,malla_curricular,ciclo,AVG(creditos),programa=Sistemas
+109,Cursos del ciclo 1 de Contabilidad,list,,malla_curricular,,,ciclo=1&programa=Contabilidad
+110,Cursos del último ciclo de Ingeniería Civil,list,,malla_curricular,,,ciclo=10&programa=Civil
+111,Cuántas unidades tienen los sílabos de Medicina,count,bar,silabos,curso,COUNT(unidad),programa=Medicina
+112,Promedio de sesiones por unidad en Derecho,aggregate,bar,silabos,curso,AVG(sesion),programa=Derecho
+113,Resultados de aprendizaje por curso en Psicología,list,,silabos,ra_unitario,,programa=Psicologia
+114,Cuántos resultados de aprendizaje tiene cada sílabo,count,bar,silabos,curso,COUNT(ra_unitario),
+115,Distribución de sesiones por ciclo,count,bar,silabos,ciclo,COUNT(sesion),
+116,Hazme un resumen de la malla de Teología,list,,malla_curricular,,,programa=Teologia
+117,Ver el perfil de egreso de Ingeniería Ambiental,list,,plan_estudios,perfil_egreso,,programa=Ambiental
+118,Cuántas competencias tiene el plan de Nutrición,count,,plan_estudios,,COUNT(competencias_generales),programa=Nutricion
+119,Planes con más competencias específicas,ranking,horizontal_bar,plan_estudios,programa_estudio,COUNT(competencias_especificas),
+120,Fundamento curricular de los planes vigentes,list,,plan_estudios,fundamento_curricular,,estado=vigente
+121,Créditos por área de formación en Sistemas,aggregate,bar,malla_curricular,area_formacion,SUM(creditos),programa=Sistemas
+122,Horas laboratorio por ciclo en Medicina,aggregate,bar,malla_curricular,ciclo,SUM(horas_laboratorio),programa=Medicina
+123,Relación créditos vs horas totales por curso,chart,scatter,malla_curricular,,creditos vs horas_totales,
+124,Distribución de horas teóricas por área,aggregate,bar,malla_curricular,area_formacion,SUM(horas_teoricas),
+125,Comparativa de horas prácticas vs teóricas por ciclo,chart,bar,malla_curricular,ciclo,SUM(horas_practicas)-SUM(horas_teoricas),
+126,Cuántos cursos tienen requisito previo,count,,malla_curricular,,COUNT,requisito_codigo_curso IS NOT NULL
+127,Lista de cursos con prerrequisito en Sistemas,list,,malla_curricular,,,programa=Sistemas&requisito IS NOT NULL
+128,Cursos sin prerrequisito en el ciclo 1,list,,malla_curricular,,,ciclo=1&requisito IS NULL
+129,Distribución de cursos por orden en la malla,count,bar,malla_curricular,orden_malla,COUNT,
+130,Cuántos cursos activos hay por programa,count,bar,malla_curricular,programa_estudio,COUNT,estado=activo
+131,Recursos por tipo de bibliografía,count,pie,recurso_aprendizaje,tipo_bibliografia,COUNT,
+132,Cuántos recursos hay en inglés,count,,recurso_aprendizaje,,COUNT,idioma=ingles
+133,Libros publicados después del 2020,list,,recurso_aprendizaje,,,anio_publicacion>2020
+134,Recursos sin URL registrada,count,,recurso_aprendizaje,,COUNT,url_recurso IS NULL
+135,Ranking de autores con más recursos,ranking,horizontal_bar,recurso_aprendizaje,autor,COUNT,
+136,Recursos por unidad en Metodología de Investigación,list,,recurso_aprendizaje,,,curso=Metodologia
+137,Cuántos recursos tiene cada sesión de Estadística,count,bar,recurso_aprendizaje,sesion,COUNT,curso=Estadistica
+138,Distribución de recursos por formato,count,pie,recurso_aprendizaje,formato,COUNT,
+139,Recursos obligatorios de Contabilidad por ciclo,count,bar,recurso_aprendizaje,ciclo,COUNT,curso=Contabilidad&obligatorio=si
+140,Palabras clave más frecuentes en recursos,list,,recurso_aprendizaje,palabras_clave,,
+141,Evidencias completas del formato C1 por programa,count,bar,sunedu_evidencia_curricular,programa_estudio,COUNT,codigo_formato=C1&estado=completo
+142,Ítems sin sustento por condición básica,count,bar,sunedu_formato_item,condicion_basica,COUNT,estado=sin_evidencia
+143,Cuántos requisitos de C2 están aprobados,count,,sunedu_evidencia_curricular,,COUNT,codigo_formato=C2&estado=aprobado
+144,Validación de evidencias por facultad en C1,count,bar,sunedu_evidencia_curricular,facultad,COUNT,codigo_formato=C1
+145,Porcentaje de cumplimiento SUNEDU por sede,chart,pie,sunedu_evidencia_curricular,sede,COUNT,estado=validado
+146,Ítems de C1 que aplican a pregrado,list,,sunedu_formato_item,,,codigo_formato=C1&aplica_pregrado=si
+147,Evidencias por tipo de trámite SUNEDU,count,bar,sunedu_formato,tipo_tramite,COUNT,
+148,Subsanación pendiente por programa en C2,count,bar,sunedu_evidencia_curricular,programa_estudio,COUNT,codigo_formato=C2&estado=pendiente
+149,Documentos observados por ciclo,count,bar,sunedu_evidencia_curricular,ciclo,COUNT,estado=observado
+150,Comparativa de cumplimiento C1 vs C2 por sede,chart,bar,sunedu_evidencia_curricular,sede,COUNT,
+151,Cuántas carreras hay por sede,count,bar,plan_estudios,sede,COUNT(DISTINCT programa_estudio),
+152,Programas presenciales por facultad,count,bar,plan_estudios,facultad,COUNT,modalidad=presencial
+153,Distribución de carreras por nivel académico,count,pie,plan_estudios,nivel_academico,COUNT,
+154,Cuántos títulos profesionales distintos existen,count,,plan_estudios,,COUNT(DISTINCT titulo_profesional),
+155,Programas de posgrado por sede,count,bar,plan_estudios,sede,COUNT,nivel_academico=posgrado
+156,Objetivo de programa de Administración,list,,plan_estudios,objetivo_programa,,programa=Administracion
+157,Competencias generales de Ingeniería de Sistemas,list,,plan_estudios,competencias_generales,,programa=Sistemas
+158,Cuántos planes tienen modalidad a distancia,count,,plan_estudios,,COUNT,modalidad=distancia
+159,Versiones de plan por programa en Lima,count,bar,plan_estudios,programa_estudio,COUNT(version_plan),sede=Lima
+160,Planes iniciados en 2024,list,,plan_estudios,,,periodo_inicio=2024
+161,nro de cursos por facultad,count,bar,silabos,facultad,COUNT,
+162,cuantos silabos en tarapoto,count,,silabos,,COUNT,sede=Tarapoto
+163,dame la lista de cursos de sistemas,list,,silabos,,,programa=Sistemas
+164,muéstrame los recursos de calculo,list,,recurso_aprendizaje,,,curso=Calculo
+165,cual es el total de creditos de administracion,aggregate,,plan_estudios,,SUM(total_creditos),programa=Administracion
+166,graficame las modalidades,chart,pie,silabos,modalidad_estudio,COUNT,
+167,hazme un ranking de facultades por cursos,ranking,horizontal_bar,silabos,facultad,COUNT,
+168,muestra la malla de contabilidad,list,,malla_curricular,,,programa=Contabilidad
+169,ver evidencias pendientes,list,,sunedu_evidencia_curricular,,,estado=pendiente
+170,cuantos items tiene c1,count,,sunedu_formato_item,,COUNT,codigo_formato=C1
+171,Cuántos cursos de humanidades hay,count,,malla_curricular,,COUNT,area_formacion=humanidades
+172,Asignaturas de ciencias básicas por programa,count,bar,malla_curricular,programa_estudio,COUNT,area_formacion=ciencias_basicas
+173,Cursos de formación adventista por facultad,count,bar,malla_curricular,facultad,COUNT,area_formacion=formacion_adventista
+174,Cuántas materias de práctica hay en Medicina,count,,malla_curricular,,COUNT,programa=Medicina&tipo_curso=practica
+175,Distribución de cursos por tipo en Teología,count,pie,malla_curricular,tipo_curso,COUNT,programa=Teologia
+176,Créditos de formación general por programa,aggregate,bar,malla_curricular,programa_estudio,SUM(creditos),area_formacion=general
+177,Horas de laboratorio por programa en Ciencias,aggregate,bar,malla_curricular,programa_estudio,SUM(horas_laboratorio),facultad=Ciencias
+178,Cursos electivos disponibles en Administración,list,,malla_curricular,,,programa=Administracion&tipo_curso=electivo
+179,Promedio de créditos por tipo de curso,aggregate,bar,malla_curricular,tipo_curso,AVG(creditos),
+180,Total de horas aula por área de formación,aggregate,bar,malla_curricular,area_formacion,SUM(horas_totales),
+181,Muéstrame sílabos con sumilla de investigación,list,,silabos,,,sumilla CONTAINS investigacion
+182,Cursos cuya sumilla menciona ética,list,,silabos,,,sumilla CONTAINS etica
+183,Asignaturas relacionadas con estadística,list,,silabos,,,curso CONTAINS estadistica
+184,Cursos de inglés en todos los programas,list,,silabos,,,curso CONTAINS ingles
+185,Sílabos que incluyen trabajo comunitario,list,,silabos,,,sumilla CONTAINS comunitario
+186,Cursos con resultados de aprendizaje de investigación,list,,silabos,,,ra_unitario CONTAINS investigacion
+187,Asignaturas con referencias de Elena White,list,,recurso_aprendizaje,,,autor CONTAINS White
+188,Recursos relacionados con cosmovisión bíblica,list,,recurso_aprendizaje,,,palabras_clave CONTAINS biblica
+189,Cursos con bibliografía en español,count,bar,recurso_aprendizaje,programa_estudio,COUNT,idioma=español
+190,Sílabos con más de 4 unidades,list,,silabos,,,unidades > 4
+191,Boxplot de créditos por programa,chart,boxplot,malla_curricular,programa_estudio,creditos,
+192,Variabilidad de horas por ciclo,chart,boxplot,malla_curricular,ciclo,horas_totales,
+193,Concentración de cursos por programa y ciclo,chart,heatmap,malla_curricular,programa_estudio-ciclo,COUNT,
+194,Créditos vs horas prácticas por curso,chart,scatter,malla_curricular,,creditos vs horas_practicas,
+195,Distribución de horas teóricas por histograma,chart,histogram,silabos,,horas_teoricas,
+196,Tendencia de planes de estudio por año,chart,line,plan_estudios,periodo_inicio,COUNT,
+197,Evolución de créditos por periodo en Sistemas,chart,line,plan_estudios,periodo_inicio,SUM(total_creditos),programa=Sistemas
+198,Heatmap de evidencias SUNEDU por sede y estado,chart,heatmap,sunedu_evidencia_curricular,sede-estado_validacion,COUNT,
+199,Scatter de ítems vs evidencias por programa,chart,scatter,sunedu_evidencia_curricular,,COUNT vs COUNT,
+200,Distribución porcentual de modalidades por sede,chart,pie,plan_estudios,modalidad_estudio,COUNT,
+201,Cuántos cursos por semestre tiene Psicología,count,bar,malla_curricular,ciclo,COUNT,programa=Psicologia
+202,Total de créditos del plan de Derecho,aggregate,,plan_estudios,,SUM(total_creditos),programa=Derecho
+203,Promedio de horas por asignatura en Arquitectura,aggregate,,silabos,,AVG(horas_totales),programa=Arquitectura
+204,Ranking de cursos por créditos en Ingeniería Civil,ranking,horizontal_bar,malla_curricular,curso,MAX(creditos),programa=Civil
+205,Cuántos cursos electivos tiene Nutrición,count,,malla_curricular,,COUNT,programa=Nutricion&tipo=electivo
+206,Lista de competencias de Obstetricia,list,,plan_estudios,competencias_especificas,,programa=Obstetricia
+207,Recursos de aprendizaje de Anatomía,list,,recurso_aprendizaje,,,curso=Anatomia
+208,Cuántas referencias bibliográficas tiene Fisiología,count,,recurso_aprendizaje,,COUNT,curso=Fisiologia
+209,Horas de laboratorio de Química por ciclo,aggregate,bar,malla_curricular,ciclo,SUM(horas_laboratorio),programa=Quimica
+210,Distribución de cursos en la malla de Farmacia,count,bar,malla_curricular,ciclo,COUNT,programa=Farmacia
+211,cuantos cursos ay por faculta,count,bar,silabos,facultad,COUNT,
+212,cantdad de silabos por carrera,count,bar,silabos,programa_estudio,COUNT,
+213,muéstrame los cursos de infermieria,list,,silabos,,,programa=Enfermeria
+214,grafco de barras de sedes,chart,bar,silabos,sede,COUNT,
+215,distibusion por modalidad,count,pie,silabos,modalidad_estudio,COUNT,
+216,cuantos creditso tiene el plan de sistemas,aggregate,,plan_estudios,,SUM(total_creditos),programa=Sistemas
+217,top de programas con mas oras,ranking,horizontal_bar,silabos,programa_estudio,SUM(horas_totales),
+218,evidensias pendientes de c1,count,bar,sunedu_evidencia_curricular,programa_estudio,COUNT,codigo_formato=C1&estado=pendiente
+219,malla de aministracion,list,,malla_curricular,,,programa=Administracion
+220,promedio de credtos por ciclo,aggregate,bar,malla_curricular,ciclo,AVG(creditos),
+221,Cuántos sílabos tienen enlace de internet registrado,count,,silabos,,COUNT,enlaces_internet IS NOT NULL
+222,Recursos con URL activa por curso,count,bar,recurso_aprendizaje,curso,COUNT,url_recurso IS NOT NULL
+223,Distribución de recursos por año de publicación,count,bar,recurso_aprendizaje,anio_publicacion,COUNT,
+224,Recursos más recientes por programa,ranking,horizontal_bar,recurso_aprendizaje,programa_estudio,MAX(anio_publicacion),
+225,Cuántos recursos tiene cada tipo de bibliografía,count,pie,recurso_aprendizaje,tipo_bibliografia,COUNT,
+226,Libros sin editorial registrada,list,,recurso_aprendizaje,,,editorial IS NULL&tipo_recurso=libro
+227,Cuántos recursos en formato PDF hay,count,,recurso_aprendizaje,,COUNT,formato=pdf
+228,Distribución de recursos por sesión en Bioestadística,count,bar,recurso_aprendizaje,sesion,COUNT,curso=Bioestadistica
+229,Top autores con más publicaciones referenciadas,ranking,horizontal_bar,recurso_aprendizaje,autor,COUNT,
+230,Recursos de aprendizaje autónomo por ciclo,count,bar,recurso_aprendizaje,ciclo,COUNT,tipo_recurso=autonomo
+231,Cuántos planes tienen perfil de egreso definido,count,,plan_estudios,,COUNT,perfil_egreso IS NOT NULL
+232,Programas sin objetivo definido en el plan,list,,plan_estudios,,,objetivo_programa IS NULL
+233,Distribución de planes por modalidad y sede,chart,heatmap,plan_estudios,sede-modalidad_estudio,COUNT,
+234,Total de competencias por plan de estudio,count,bar,plan_estudios,programa_estudio,COUNT(competencias_generales),
+235,Planes con más de 200 créditos,list,,plan_estudios,,,total_creditos > 200
+236,Programas con plan activo en 2026,list,,plan_estudios,,,estado=activo&periodo_fin>=2026
+237,Cuántas versiones tiene el plan de Administración,count,,plan_estudios,,COUNT(version_plan),programa=Administracion
+238,Grado académico más común en los planes,count,bar,plan_estudios,grado_academico,COUNT,
+239,Distribución de títulos profesionales por facultad,count,bar,plan_estudios,facultad,COUNT(DISTINCT titulo_profesional),
+240,Planes de estudio por fundamento curricular,count,bar,plan_estudios,fundamento_curricular,COUNT,
+241,Cuántos ítems de C1 son obligatorios,count,,sunedu_formato_item,,COUNT,codigo_formato=C1&obligatorio=si
+242,Componentes de C2 por subgrupo,count,bar,sunedu_formato_item,subgrupo,COUNT,codigo_formato=C2
+243,Ítems que aplican a modalidad semipresencial,count,,sunedu_formato_item,,COUNT,aplica_semipresencial=si
+244,Evidencias validadas del C1 en Juliaca,count,,sunedu_evidencia_curricular,,COUNT,codigo_formato=C1&sede=Juliaca&estado=validado
+245,Cuántos ítems de C1 aplican a distancia,count,,sunedu_formato_item,,COUNT,codigo_formato=C1&aplica_distancia=si
+246,Documentos URL por programa en evidencias,list,,sunedu_evidencia_curricular,url_documento,,programa IS NOT NULL&url_documento IS NOT NULL
+247,Fechas de registro de evidencias por facultad,list,,sunedu_evidencia_curricular,fecha_registro,,
+248,Observaciones registradas en evidencias de C2,list,,sunedu_evidencia_curricular,observacion,,codigo_formato=C2
+249,Estado de validación por curso en evidencias,count,bar,sunedu_evidencia_curricular,curso,COUNT,estado_validacion IS NOT NULL
+250,Cuántas evidencias no tienen URL de documento,count,,sunedu_evidencia_curricular,,COUNT,url_documento IS NULL
+251,Cursos compartidos entre dos programas,list,,malla_curricular,curso,,
+252,Asignaturas que se repiten por sede,count,bar,malla_curricular,sede,COUNT(DISTINCT curso),
+253,Cursos con misma sumilla en diferentes programas,list,,silabos,sumilla,,
+254,Distribución de cursos únicos por facultad,count,bar,silabos,facultad,COUNT(DISTINCT curso),
+255,Cuántos cursos distintos hay en toda la institución,count,,silabos,,COUNT(DISTINCT curso),
+256,Programas que comparten más cursos,ranking,horizontal_bar,malla_curricular,programa_estudio,COUNT(DISTINCT codigo_curso),
+257,Cursos con mayor presencia en la institución,ranking,horizontal_bar,malla_curricular,curso,COUNT,
+258,Asignaturas de inglés por sede,count,bar,silabos,sede,COUNT,curso CONTAINS ingles
+259,Cursos de matemáticas en todos los programas,list,,malla_curricular,,,curso CONTAINS matematica
+260,Distribución de idiomas en bibliografía por sede,count,bar,recurso_aprendizaje,idioma,COUNT,
+261,nro de cursos por semestre en sistemas,count,bar,malla_curricular,ciclo,COUNT,programa=Sistemas
+262,total de horas por semana en administracion,aggregate,,malla_curricular,,SUM(horas_totales),programa=Administracion
+263,ver plan de estudios de contabilidad,list,,plan_estudios,,,programa=Contabilidad
+264,cuantas evidencias observadas en c2,count,,sunedu_evidencia_curricular,,COUNT,codigo_formato=C2&estado=observado
+265,dame los recursos de biologia,list,,recurso_aprendizaje,,,curso=Biologia
+266,ranking de sedes por creditos,ranking,horizontal_bar,plan_estudios,sede,SUM(total_creditos),
+267,graficame la distribucion de titulos,chart,pie,plan_estudios,titulo_profesional,COUNT,
+268,cuantos items tiene formato c2,count,,sunedu_formato_item,,COUNT,codigo_formato=C2
+269,muestra cursos del ciclo 3 de enfermeria,list,,malla_curricular,,,ciclo=3&programa=Enfermeria
+270,horas laboratorio por programa,aggregate,bar,malla_curricular,programa_estudio,SUM(horas_laboratorio),
+271,Cuántos sílabos hay por grupo,count,bar,silabos,grupo,COUNT,
+272,Distribución de secciones por facultad,count,bar,silabos,facultad,COUNT(DISTINCT grupo),
+273,Cuántos grupos distintos hay en Lima,count,,silabos,,COUNT(DISTINCT grupo),sede=Lima
+274,Secciones activas por programa en 2026,count,bar,silabos,programa_estudio,COUNT,periodo=2026
+275,Total de clases por sección en Sistemas,count,bar,silabos,grupo,COUNT,programa=Sistemas
+276,Cursos con aprendizaje autónomo definido,count,,silabos,,COUNT,aprendizaje_autonomo IS NOT NULL
+277,Distribución de aprendizaje autónomo por ciclo,count,bar,silabos,ciclo,COUNT,aprendizaje_autonomo IS NOT NULL
+278,Recursos de aprendizaje autónomo por programa,count,bar,recurso_aprendizaje,programa_estudio,COUNT,tipo_recurso=autonomo
+279,Cuántas sesiones tienen resultado de aprendizaje,count,,silabos,,COUNT,ra_sesion IS NOT NULL
+280,Unidades con más resultados de aprendizaje,ranking,horizontal_bar,silabos,unidad,COUNT(ra_unitario),
+281,Cuántos planes hay por título profesional,count,bar,plan_estudios,titulo_profesional,COUNT,
+282,Distribución de programas por grado académico,count,pie,plan_estudios,grado_academico,COUNT,
+283,Créditos promedio por tipo de plan,aggregate,bar,plan_estudios,nivel_academico,AVG(total_creditos),
+284,Programas con más de 10 ciclos,list,,plan_estudios,,,total_ciclos > 10
+285,Planes cuyo fundamento menciona competencias,list,,plan_estudios,,,fundamento_curricular CONTAINS competencias
+286,Cuántos programas tienen plan en modalidad virtual,count,,plan_estudios,,COUNT,modalidad=virtual
+287,Distribución de planes por periodo de inicio,count,bar,plan_estudios,periodo_inicio,COUNT,
+288,Programas sin plan de estudios activo,list,,plan_estudios,,,estado != activo
+289,Total de ciclos en planes de posgrado,aggregate,,plan_estudios,,SUM(total_ciclos),nivel=posgrado
+290,Planes con período de vigencia mayor a 5 años,list,,plan_estudios,,,
+291,Cuántos formatos SUNEDU están activos,count,,sunedu_formato,,COUNT,estado=activo
+292,Distribución de formatos por tipo de trámite,count,pie,sunedu_formato,tipo_tramite,COUNT,
+293,Cuántas fuentes normativas distintas hay en SUNEDU,count,,sunedu_formato,,COUNT(DISTINCT fuente_normativa),
+294,Ítems de C1 por grupo y subgrupo,count,bar,sunedu_formato_item,grupo,COUNT,codigo_formato=C1
+295,Requisitos que aplican solo a presencial,count,,sunedu_formato_item,,COUNT,aplica_presencial=si&aplica_semipresencial=no
+296,Evidencias por valor numérico mayor a cero,count,,sunedu_evidencia_curricular,,COUNT,valor_numero > 0
+297,Documentos SUNEDU con observación registrada,list,,sunedu_evidencia_curricular,observacion,,observacion IS NOT NULL
+298,Cumplimiento C1 y C2 comparado por programa,chart,bar,sunedu_evidencia_curricular,programa_estudio,COUNT,
+299,Ítems sin descripción en formato C2,list,,sunedu_formato_item,,,codigo_formato=C2&descripcion_item IS NULL
+300,Resumen general de cumplimiento SUNEDU por sede y formato,chart,heatmap,sunedu_evidencia_curricular,sede-codigo_formato,COUNT,

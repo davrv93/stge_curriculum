@@ -1,0 +1,211 @@
+<?php
+/**
+ * JoMelAiController
+ * Entry point for the Motor JoMelAi unified endpoint.
+ * POST /api/ask  — main query endpoint (auth required)
+ * GET  /api/jomelai/audit  — audit log (admin only)
+ * GET  /api/jomelai/stats  — audit stats (admin only)
+ */
+final class JoMelAiController
+{
+    public function ask(): void
+    {
+        $user = Support::requireAuth();
+        $data = Support::readJson();
+
+        $question = trim((string)($data['question'] ?? ''));
+        
+
+        // Guard directo: asesoría curricular abierta.
+        // Debe ejecutarse antes de RAG, DuckDB, FastIntent o cualquier orquestador.
+        $qCurricular = Support::normalize($question);
+
+        $curricularActionTokens = [
+            'sugiere', 'sugerir', 'recomienda', 'recomendar',
+            'crea', 'crear', 'diseña', 'disena', 'diseñar', 'disenar',
+            'elabora', 'elaborar', 'propone', 'proponer',
+            'plantea', 'plantear', 'formula', 'formular',
+            'redacta', 'redactar', 'explica', 'explicar',
+            'actividades', 'estrategias', 'rubrica', 'rúbrica',
+            'verbos', 'alinear', 'alineacion', 'alineación'
+        ];
+
+        $curricularDomainTokens = [
+            'curso', 'cursos', 'asignatura', 'asignaturas',
+            'investigacion', 'investigación',
+            'aprendizaje', 'enseñanza', 'ensenanza',
+            'resultado', 'resultados',
+            'competencia', 'competencias',
+            'evaluacion', 'evaluación',
+            'perfil', 'egreso',
+            'malla', 'silabo', 'sílabo',
+            'semipresencial', 'didactica', 'didáctica'
+        ];
+
+        $curricularDataTokens = [
+            'cuantos', 'cuántos', 'cuantas', 'cuántas',
+            'cantidad', 'conteo', 'total',
+            'listar', 'lista', 'listame', 'muestrame', 'muéstrame',
+            'grafico', 'gráfico', 'grafica', 'gráfica',
+            'barras', 'pie', 'pastel', 'ranking', 'top',
+            'por sede', 'por facultad', 'por programa'
+        ];
+
+        $hasCurricularAction = false;
+        foreach ($curricularActionTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $hasCurricularAction = true;
+                break;
+            }
+        }
+
+        $hasCurricularDomain = false;
+        foreach ($curricularDomainTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $hasCurricularDomain = true;
+                break;
+            }
+        }
+
+        $isCurricularDataRequest = false;
+        foreach ($curricularDataTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $isCurricularDataRequest = true;
+                break;
+            }
+        }
+
+        $isOpenCurricularHow = (
+            (str_contains($qCurricular, 'como ') || str_contains($qCurricular, 'cómo '))
+            && $hasCurricularDomain
+            && !$isCurricularDataRequest
+        );
+
+        if ((($hasCurricularAction && $hasCurricularDomain) || $isOpenCurricularHow) && !$isCurricularDataRequest) {
+            $answer = "Para un curso de investigación, puedes organizar actividades progresivas que lleven al estudiante desde la comprensión del problema hasta la elaboración de un producto académico.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Lectura guiada de artículos científicos**\n" .
+                "   - Evidencia: ficha de análisis con problema, objetivo, método, resultados y aporte.\n\n" .
+                "2. **Formulación del problema de investigación**\n" .
+                "   - Evidencia: matriz problema–pregunta–objetivo–justificación.\n\n" .
+                "3. **Búsqueda bibliográfica académica**\n" .
+                "   - Evidencia: matriz de antecedentes con autor, año, enfoque, método y hallazgos.\n\n" .
+                "4. **Construcción del marco teórico preliminar**\n" .
+                "   - Evidencia: mapa conceptual o síntesis argumentada con fuentes académicas.\n\n" .
+                "5. **Diseño metodológico**\n" .
+                "   - Evidencia: matriz con enfoque, diseño, población, muestra, técnicas e instrumentos.\n\n" .
+                "6. **Elaboración o adaptación de instrumentos**\n" .
+                "   - Evidencia: cuestionario, guía de entrevista, ficha de observación o rúbrica.\n\n" .
+                "7. **Revisión por pares del proyecto**\n" .
+                "   - Evidencia: lista de cotejo con observaciones y mejoras aplicadas.\n\n" .
+                "8. **Presentación del protocolo de investigación**\n" .
+                "   - Evidencia: documento final y sustentación breve.\n\n" .
+                "## Secuencia recomendada\n\n" .
+                "Primero trabaja comprensión del problema; luego revisión de literatura; después diseño metodológico; finalmente comunicación académica del proyecto.";
+
+            Support::json([
+                'ok' => true,
+                'intent' => 'curricular_advice',
+                'visible_intent' => 'Asesoría curricular',
+                'mode' => 'curricular_advice_direct_inline',
+                'message' => '',
+                'summary' => 'Respondí con orientación curricular porque la pregunta solicita diseño, propuesta o asesoría, no consulta de datos.',
+                'answer' => $answer,
+                'chart_url' => null,
+                'data_url' => null,
+                'chart' => null,
+                'table' => null,
+                'sql' => null,
+                'evidence' => [],
+                'actions' => [
+                    ['label' => 'Convertir en plantilla', 'type' => 'template'],
+                    ['label' => 'Pedir ejemplo aplicado', 'type' => 'example'],
+                ],
+                'suggestions' => [
+                    'Pedir una versión en formato sílabo',
+                    'Solicitar una rúbrica evaluativa',
+                    'Contextualizar por carrera o ciclo'
+                ],
+            ]);
+            return;
+        }
+
+$context  = trim((string)($data['context']  ?? 'user'));
+        $opts     = (array)($data['options'] ?? []);
+        $includeDebug = (bool)($opts['include_debug'] ?? false);
+        $isAdmin  = ($user['role'] ?? '') === 'admin';
+
+        if ($question === '') {
+            Support::json(['ok' => false, 'message' => 'La pregunta no puede estar vacía.'], 400);
+            return;
+        }
+        if (mb_strlen($question, 'UTF-8') > 2000) {
+            Support::json(['ok' => false, 'message' => 'La pregunta no debe superar los 2000 caracteres.'], 400);
+            return;
+        }
+
+        $startMs = (int)(microtime(true) * 1000);
+
+        try {
+            $classifier   = new JoMelAiIntentClassifier();
+            $intentResult = $classifier->classify($question);
+
+            $orchestrator = new JoMelAiOrchestrator();
+            $engineResult = $orchestrator->execute($intentResult, $question, $opts);
+
+            $formatter    = new JoMelAiResponseFormatter();
+            $response     = $formatter->format($intentResult, $engineResult, $includeDebug, $isAdmin);
+
+        } catch (Throwable $e) {
+            $durationMs = (int)(microtime(true) * 1000) - $startMs;
+            Support::json([
+                'ok'             => false,
+                'intent'         => 'unknown',
+                'visible_intent' => 'Error',
+                'message'        => 'Ocurrió un error al procesar tu solicitud. Inténtalo nuevamente.',
+                'summary'        => '',
+                'answer'         => '',
+                'chart_url'      => null,
+                'data_url'       => null,
+                'table'          => null,
+                'evidence'       => [],
+                'actions'        => [],
+                'suggestions'    => [],
+                'debug'          => $isAdmin && $includeDebug
+                    ? ['error' => $e->getMessage(), 'duration_ms' => $durationMs]
+                    : null,
+            ], 500);
+            return;
+        }
+
+        $durationMs = (int)(microtime(true) * 1000) - $startMs;
+        $response['_duration_ms'] = $durationMs;        // may be used by debug block
+
+        // Persist audit record (non-blocking best-effort)
+        try {
+            $engineResult['_duration_ms'] = $durationMs;
+            (new JoMelAiAuditService())->log($user, $question, $intentResult, $engineResult, $durationMs);
+        } catch (Throwable) {
+            // Audit failure must not break the main response
+        }
+
+        unset($response['_duration_ms']);
+        Support::json($response);
+    }
+
+    public function auditLog(): void
+    {
+        Support::requireAdmin();
+        $limit  = min((int)($_GET['limit']  ?? 100), 500);
+        $offset = max((int)($_GET['offset'] ?? 0),   0);
+        $rows   = (new JoMelAiAuditService())->getLog($limit, $offset);
+        Support::json(['ok' => true, 'rows' => $rows, 'limit' => $limit, 'offset' => $offset]);
+    }
+
+    public function auditStats(): void
+    {
+        Support::requireAdmin();
+        $stats = (new JoMelAiAuditService())->getStats();
+        Support::json(['ok' => true, 'stats' => $stats]);
+    }
+}

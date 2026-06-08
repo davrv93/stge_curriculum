@@ -1,0 +1,89 @@
+<?php
+final class OllamaClient
+{
+    private string $baseUrl;
+
+    public function __construct()
+    {
+        $this->baseUrl = Support::config('ollama_base_url');
+    }
+
+    public function health(): array
+    {
+        try {
+            $result = $this->request('GET', '/api/tags');
+            return ['ok' => true, 'base_url' => $this->baseUrl, 'models' => $result['models'] ?? []];
+        } catch (Throwable $e) {
+            return ['ok' => false, 'base_url' => $this->baseUrl, 'message' => $e->getMessage(), 'models' => []];
+        }
+    }
+
+    public function models(): array
+    {
+        return $this->health();
+    }
+
+    public function generate(string $prompt, ?string $model = null, array $options = [], ?int $timeoutSeconds = null): array
+    {
+        $model = $model ?: Support::config('ollama_default_model');
+        $payload = [
+            'model' => $model,
+            'prompt' => $prompt,
+            'stream' => false,
+            'options' => array_merge([
+                'temperature' => 0.25,
+                'top_p' => 0.9,
+                'num_ctx' => 8192,
+            ], $options),
+        ];
+        return $this->request('POST', '/api/generate', $payload, $timeoutSeconds);
+    }
+
+    public function generateFast(string $prompt, ?string $model = null, array $options = [], ?int $timeoutSeconds = null): array
+    {
+        $options = array_merge([
+            'temperature' => 0.15,
+            'top_p' => 0.82,
+            'num_ctx' => (int)Support::config('ollama_plan_ctx'),
+            'num_predict' => (int)Support::config('ollama_plan_predict'),
+            'repeat_penalty' => 1.08,
+        ], $options);
+        return $this->generate($prompt, $model, $options, $timeoutSeconds ?: (int)Support::config('ollama_plan_timeout'));
+    }
+
+    private function request(string $method, string $path, ?array $payload = null, ?int $timeoutSeconds = null): array
+    {
+        $url = $this->baseUrl . $path;
+        $headers = ['Content-Type: application/json'];
+        $opts = [
+            'http' => [
+                'method' => $method,
+                'header' => implode("\r\n", $headers),
+                'timeout' => max(1, $timeoutSeconds ?: (int)Support::config('ollama_http_timeout')),
+                'ignore_errors' => true,
+            ],
+        ];
+        if ($payload !== null) {
+            $opts['http']['content'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+        $context = stream_context_create($opts);
+        $raw = @file_get_contents($url, false, $context);
+        if ($raw === false) {
+            throw new RuntimeException('No se pudo conectar con Ollama en ' . $this->baseUrl);
+        }
+        $statusLine = $http_response_header[0] ?? 'HTTP/1.1 200 OK';
+        if (!preg_match('/\s(\d{3})\s/', $statusLine, $m)) {
+            $status = 200;
+        } else {
+            $status = (int)$m[1];
+        }
+        $json = json_decode($raw, true);
+        if ($status >= 400) {
+            throw new RuntimeException('Ollama respondió HTTP ' . $status . ': ' . Support::strLimit($raw, 500));
+        }
+        if (!is_array($json)) {
+            throw new RuntimeException('Respuesta inválida de Ollama: ' . Support::strLimit($raw, 500));
+        }
+        return $json;
+    }
+}

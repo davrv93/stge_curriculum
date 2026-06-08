@@ -1,0 +1,35 @@
+# Entorno
+
+# Dependencias
+node_modules/
+vendor/
+
+# Builds/cache
+dist/
+build/
+.cache/
+.tmp/
+temp/
+tmp/
+
+# Logs
+*.log
+logs/
+
+# Ollama / modelos locales pesados
+data/ollama/
+ollama/
+models/
+**/ollama/models/
+**/models/blobs/
+**/blobs/sha256-*
+
+# Bundles/exportaciones locales pesadas
+jomelai_ec2_bundle_*/
+*.tar
+*.tar.gz
+*.zip
+
+# Sistema
+.DS_Store
+Thumbs.db

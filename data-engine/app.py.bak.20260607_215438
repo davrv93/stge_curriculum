@@ -1,0 +1,2070 @@
+import base64
+import csv
+import io
+import json
+import os
+import re
+import time
+import threading
+import uuid
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+import duckdb
+import pandas as pd
+import requests
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+try:
+    from fast_intent_engine import resolve_intent
+except Exception:
+    def resolve_intent(*args, **kwargs):
+        import re
+        import unicodedata
+
+        def norm(text):
+            text = str(text or "").lower()
+            text = "".join(
+                c for c in unicodedata.normalize("NFD", text)
+                if unicodedata.category(c) != "Mn"
+            )
+            text = re.sub(r"[^a-z0-9_ %.-]+", " ", text)
+            return re.sub(r"\s+", " ", text).strip()
+
+        def safe_ident(name, default="silabos"):
+            name = str(name or default).strip()
+            return name if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name) else default
+
+        question = kwargs.get("question") or kwargs.get("userAsk") or kwargs.get("ask") or ""
+        table = safe_ident(kwargs.get("table") or "silabos")
+        q = norm(question)
+
+        dimensions = {
+            "facultad": ["facultad", "facultades"],
+            "programa_estudio": ["programa", "programa de estudio", "carrera", "escuela", "especialidad"],
+            "sede": ["sede", "campus", "filial", "juliaca", "lima", "tarapoto"],
+            "modalidad_estudio": ["modalidad", "presencial", "virtual", "semipresencial", "distancia"],
+            "ciclo": ["ciclo", "semestre", "nivel"],
+            "curso": ["curso", "asignatura", "materia"],
+        }
+
+        metrics = {
+            "creditos": ["credito", "creditos", "crd", "peso academico"],
+            "horas_teoricas": ["horas teoricas", "teoria", "ht"],
+            "horas_practicas": ["horas practicas", "practica", "hp"],
+            "horas_totales": ["horas totales", "total horas", "carga horaria", "horas de clase"],
+            "total_creditos": ["total creditos", "creditos totales"],
+        }
+
+        dimension = None
+        for col, aliases in dimensions.items():
+            if col in q or any(a in q for a in aliases):
+                dimension = col
+                break
+
+        metric = None
+        for col, aliases in metrics.items():
+            if col in q or any(a in q for a in aliases):
+                metric = col
+                break
+
+        filters = []
+        if "juliaca" in q:
+            filters.append("sede ILIKE '%Juliaca%'")
+        if "lima" in q:
+            filters.append("sede ILIKE '%Lima%'")
+        if "tarapoto" in q:
+            filters.append("sede ILIKE '%Tarapoto%'")
+        if "sistemas" in q:
+            filters.append("programa_estudio ILIKE '%Sistemas%'")
+        if "c1" in q:
+            filters.append("codigo_formato ILIKE '%C1%'")
+        if "c2" in q:
+            filters.append("codigo_formato ILIKE '%C2%'")
+        if "pendiente" in q or "pendientes" in q:
+            filters.append("estado_validacion ILIKE '%pendiente%'")
+
+        where = (" WHERE " + " AND ".join(filters)) if filters else ""
+
+        wants_chart = any(x in q for x in ["grafico", "grafica", "pastel", "barras", "chart", "visualizar", "diagrama"])
+        wants_pie = any(x in q for x in ["pastel", "pie", "torta", "circular", "porcentaje", "proporcion"])
+        wants_scatter = any(x in q for x in ["scatter", "dispersion", "dispercion", "correlacion", " vs ", " versus "])
+        wants_sum = any(x in q for x in ["suma", "sumatoria", "total creditos", "total horas"])
+        wants_avg = any(x in q for x in ["promedio", "media"])
+        wants_list = any(x in q for x in ["lista", "listar", "muestrame", "mostrar", "detalle", "ver "])
+        wants_count = any(x in q for x in ["cuantos", "cantidad", "conteo", "contador", "numero", "nro", "distribucion", "frecuencia", "por "])
+
+        chart_type = "pie" if wants_pie else ("scatter" if wants_scatter else "bar")
+
+        if wants_scatter:
+            x = "TRY_CAST(creditos AS DOUBLE)"
+            y = "TRY_CAST(horas_totales AS DOUBLE)"
+            sql = f"SELECT {x} AS x, {y} AS y FROM {table} WHERE {x} IS NOT NULL AND {y} IS NOT NULL LIMIT 300"
+            return {
+                "ok": True,
+                "mode": "chart",
+                "report_intent": "scatter",
+                "chart_type": "scatter",
+                "confidence": 0.78,
+                "table": table,
+                "dimensions": [],
+                "metrics": ["creditos", "horas_totales"],
+                "filters": filters,
+                "sql": sql,
+                "x": "x",
+                "y": "y",
+                "title": "Dispersión créditos vs horas",
+            }
+
+        if wants_sum or wants_avg:
+            metric = metric or "creditos"
+            agg = "AVG" if wants_avg else "SUM"
+            expr = f"TRY_CAST({metric} AS DOUBLE)"
+            if dimension:
+                sql = f"SELECT {dimension} AS categoria, {agg}({expr}) AS valor FROM {table}{where} GROUP BY {dimension} ORDER BY valor DESC LIMIT 50"
+            else:
+                sql = f"SELECT {agg}({expr}) AS valor FROM {table}{where} LIMIT 1"
+            return {
+                "ok": True,
+                "mode": "chart" if wants_chart or dimension else "sql",
+                "report_intent": "aggregate",
+                "chart_type": chart_type,
+                "confidence": 0.80,
+                "table": table,
+                "dimensions": [dimension] if dimension else [],
+                "metrics": [metric],
+                "filters": filters,
+                "sql": sql,
+                "x": "categoria" if dimension else None,
+                "y": "valor",
+                "title": f"{agg} de {metric}",
+            }
+
+        if wants_list and not wants_count:
+            sql = f"SELECT * FROM {table}{where} LIMIT 100"
+            return {
+                "ok": True,
+                "mode": "sql",
+                "report_intent": "list",
+                "chart_type": None,
+                "confidence": 0.76,
+                "table": table,
+                "dimensions": [],
+                "metrics": [],
+                "filters": filters,
+                "sql": sql,
+                "title": "Listado",
+            }
+
+        dimension = dimension or ("programa_estudio" if "programa" in q or "carrera" in q else "facultad")
+        limit = 8 if chart_type == "pie" else 50
+        sql = f"SELECT {dimension} AS categoria, COUNT(*) AS total FROM {table}{where} GROUP BY {dimension} ORDER BY total DESC LIMIT {limit}"
+        return {
+            "ok": True,
+            "mode": "chart" if wants_chart or wants_count else "sql",
+            "report_intent": "count",
+            "chart_type": chart_type,
+            "confidence": 0.82,
+            "table": table,
+            "dimensions": [dimension],
+            "metrics": [],
+            "filters": filters,
+            "sql": sql,
+            "x": "categoria",
+            "y": "total",
+            "title": f"Conteo por {dimension}",
+        }
+
+
+try:
+    import chromadb
+except Exception:  # pragma: no cover
+    chromadb = None
+
+DUCKDB_PATH = os.getenv("DUCKDB_PATH", "/engine_storage/duckdb/silabos.duckdb")
+CHROMA_PATH = os.getenv("CHROMA_PATH", "/engine_storage/chroma")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434").rstrip("/")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+DEFAULT_TABLE = os.getenv("DUCKDB_TABLE", "silabos")
+MAX_QUERY_LIMIT = int(os.getenv("MAX_QUERY_LIMIT", "500"))
+MAX_CHART_ROWS = int(os.getenv("MAX_CHART_ROWS", "5000"))
+JOBS_PATH = os.getenv("JOBS_PATH", "/engine_storage/jobs")
+SYLLABI_PATH = os.getenv("SYLLABI_PATH", "/data/syllabi")
+
+api = FastAPI(title="UPeU Silabo Data Engine", version="3.0.0")
+
+
+def ensure_dirs() -> None:
+    Path(DUCKDB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
+    Path(JOBS_PATH).mkdir(parents=True, exist_ok=True)
+
+
+def q_ident(name: str) -> str:
+    value = str(name or "").strip()
+    if value == "" or len(value) > 128:
+        raise HTTPException(status_code=422, detail=f"Identificador invalido: {name}")
+    return '"' + value.replace('"', '""') + '"'
+
+
+def q_str(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def con() -> duckdb.DuckDBPyConnection:
+    ensure_dirs()
+    return duckdb.connect(DUCKDB_PATH)
+
+
+def normalize_column(col: str) -> str:
+    value = str(col or "").strip().lower()
+    repl = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
+    value = value.translate(repl)
+    value = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_")
+    return value or "columna"
+
+
+def unique_columns(cols: Iterable[str]) -> List[str]:
+    seen: Dict[str, int] = {}
+    result: List[str] = []
+    for c in cols:
+        base = normalize_column(c)
+        n = seen.get(base, 0) + 1
+        seen[base] = n
+        result.append(base if n == 1 else f"{base}_{n}")
+    return result
+
+
+def table_columns(table: str) -> List[Dict[str, Any]]:
+    q_ident(table)
+    cx = con()
+    try:
+        rows = cx.execute(f"PRAGMA table_info({q_str(table)})").fetchall()
+    finally:
+        cx.close()
+    return [
+        {"cid": r[0], "name": r[1], "type": r[2], "notnull": r[3], "default": r[4], "pk": r[5]}
+        for r in rows
+    ]
+
+
+def list_tables() -> List[str]:
+    cx = con()
+    try:
+        rows = cx.execute("SHOW TABLES").fetchall()
+    finally:
+        cx.close()
+    return [r[0] for r in rows]
+
+
+def safe_select_sql(sql: str) -> str:
+    raw = (sql or "").strip()
+    if not raw:
+        raise HTTPException(status_code=422, detail="La consulta SQL esta vacia.")
+    raw = re.sub(r"^```(?:sql)?", "", raw, flags=re.I).strip()
+    raw = re.sub(r"```$", "", raw).strip()
+    raw = raw.rstrip(";").strip()
+    lowered = re.sub(r"\s+", " ", raw.lower())
+    if not (lowered.startswith("select ") or lowered.startswith("with ")):
+        raise HTTPException(status_code=422, detail="Solo se permiten consultas SELECT/WITH.")
+    blocked = [" insert ", " update ", " delete ", " drop ", " alter ", " create ", " attach ", " detach ", " copy ", " export ", " pragma ", " call "]
+    blocked_functions = ["read_csv", "read_parquet", "read_json", "read_text", "httpfs", "load_extension", "install ", "secret", "sqlite_scan"]
+    padded = f" {lowered} "
+    if any(token in padded for token in blocked) or any(token in lowered for token in blocked_functions):
+        raise HTTPException(status_code=422, detail="La consulta contiene una operacion no permitida.")
+    if ";" in raw:
+        raise HTTPException(status_code=422, detail="No se permite ejecutar multiples sentencias.")
+    return raw
+
+
+def rows_to_dicts(cursor, rows: List[Tuple[Any, ...]]) -> List[Dict[str, Any]]:
+    cols = [d[0] for d in cursor.description]
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        out.append({cols[i]: row[i] for i in range(len(cols))})
+    return out
+
+
+def pick_text_columns(cols: List[str]) -> List[str]:
+    preferred = [
+        "curso", "nombre_curso", "asignatura", "programa", "facultad", "escuela", "competencia",
+        "sumilla", "contenidos", "contenido", "resultado", "resultados", "evaluacion", "bibliografia",
+        "descripcion", "perfil", "unidad", "tema", "saber", "capacidad"
+    ]
+    norm = {normalize_column(c): c for c in cols}
+    selected = [norm[p] for p in preferred if p in norm]
+    if selected:
+        return selected
+    return cols[: min(len(cols), 12)]
+
+
+def chunk_text(text: str, size: int = 1300, overlap: int = 150) -> List[str]:
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if not text:
+        return []
+    if len(text) <= size:
+        return [text]
+    pieces = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + size)
+        pieces.append(text[start:end].strip())
+        if end == len(text):
+            break
+        start = max(0, end - overlap)
+    return [p for p in pieces if p]
+
+
+def embed_one(text: str) -> List[float]:
+    payload = {
+        "model": EMBED_MODEL,
+        "input": text
+    }
+
+    r = requests.post(f"{OLLAMA_BASE_URL}/api/embed", json=payload, timeout=180)
+    r.raise_for_status()
+
+    data = r.json()
+    embeddings = data.get("embeddings")
+
+    if not isinstance(embeddings, list) or not embeddings:
+        raise RuntimeError("Ollama no devolvio embeddings.")
+
+    emb = embeddings[0]
+
+    if not isinstance(emb, list):
+        raise RuntimeError("Ollama devolvio un embedding invalido.")
+
+    return [float(x) for x in emb]
+
+
+def embed_many(texts: List[str]) -> List[List[float]]:
+    if not texts:
+        return []
+    try:
+        r = requests.post(f"{OLLAMA_BASE_URL}/api/embed", json={"model": EMBED_MODEL, "input": texts}, timeout=240)
+        if r.ok:
+            data = r.json()
+            embeddings = data.get("embeddings")
+            if isinstance(embeddings, list) and len(embeddings) == len(texts):
+                return [[float(x) for x in e] for e in embeddings]
+    except Exception:
+        pass
+    return [embed_one(t) for t in texts]
+
+
+def chroma_collection(name: str):
+    if chromadb is None:
+        raise HTTPException(status_code=500, detail="ChromaDB no esta instalado en el contenedor data-engine.")
+    Path(CHROMA_PATH).mkdir(parents=True, exist_ok=True)
+    Path(JOBS_PATH).mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=CHROMA_PATH)
+    return client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"})
+
+
+def infer_chart_columns(df: pd.DataFrame, x_col: Optional[str], y_col: Optional[str]) -> Tuple[str, str]:
+    cols = list(df.columns)
+    if not cols:
+        raise HTTPException(status_code=422, detail="La consulta no devolvio columnas.")
+    x = x_col if x_col in cols else cols[0]
+    numeric_candidates = []
+    for c in cols:
+        if c == x:
+            continue
+        s = pd.to_numeric(df[c], errors="coerce")
+        if s.notna().sum() > 0:
+            numeric_candidates.append(c)
+    y = y_col if y_col in cols else (numeric_candidates[0] if numeric_candidates else (cols[1] if len(cols) > 1 else cols[0]))
+    return x, y
+
+
+def _duckdb_numeric_expr(col: str) -> str:
+    """
+    Convierte columnas VARCHAR institucionales a DOUBLE de forma tolerante.
+    Soporta números con coma decimal, símbolos, espacios y valores vacíos.
+    """
+    ident = q_ident(col)
+    return (
+        f"TRY_CAST(NULLIF("
+        f"REPLACE("
+        f"REGEXP_REPLACE(CAST({ident} AS VARCHAR), '[^0-9,.-]', '', 'g'), "
+        f"',', '.'"
+        f"), "
+        f"''"
+        f") AS DOUBLE)"
+    )
+
+
+def _table_column_names(table: str) -> List[str]:
+    try:
+        return [str(c.get("name")) for c in table_columns(table)]
+    except Exception:
+        return []
+
+
+def _norm_identifier(value: str) -> str:
+    repl = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
+    value = str(value or "").strip().lower().translate(repl)
+    value = re.sub(r"[^a-z0-9]+", "_", value).strip("_")
+    return value
+
+
+def _column_lookup(table: str) -> Dict[str, str]:
+    cols = _table_column_names(table)
+    return {_norm_identifier(c): c for c in cols}
+
+
+def repair_sql_for_table(sql: str, table: str = DEFAULT_TABLE) -> str:
+    """
+    Repara SQL generado por Ollama/FastIntent cuando inventa nombres de columnas.
+    Ejemplo: creditos_practicas -> horas_practicas si existe.
+    """
+    repaired = str(sql or "")
+    lookup = _column_lookup(table)
+
+    alias_candidates = {
+        "creditos_practica": ["horas_practicas", "creditos"],
+        "creditos_practicas": ["horas_practicas", "creditos"],
+        "creditos_practico": ["horas_practicas", "creditos"],
+        "creditos_practicos": ["horas_practicas", "creditos"],
+
+        "creditos_teorica": ["horas_teoricas", "creditos"],
+        "creditos_teoricas": ["horas_teoricas", "creditos"],
+        "creditos_teorico": ["horas_teoricas", "creditos"],
+        "creditos_teoricos": ["horas_teoricas", "creditos"],
+
+        "escuela": ["programa_estudio", "programa", "carrera", "facultad"],
+        "carrera": ["programa_estudio", "programa", "escuela", "facultad"],
+        "programa": ["programa_estudio", "programa", "carrera", "facultad"],
+
+        "horas_total": ["horas_totales", "horas_total", "horas_practicas", "horas_teoricas"],
+        "horas_totales": ["horas_totales", "horas_total", "horas_practicas", "horas_teoricas"],
+        "total_creditos": ["creditos"],
+    }
+
+    for wrong, candidates in alias_candidates.items():
+        replacement = None
+        for cand in candidates:
+            cand_norm = _norm_identifier(cand)
+            if cand_norm in lookup:
+                replacement = lookup[cand_norm]
+                break
+
+        if not replacement:
+            continue
+
+        repaired = re.sub(rf"\b{re.escape(wrong)}\b", replacement, repaired, flags=re.I)
+        repaired = re.sub(rf'"{re.escape(wrong)}"', q_ident(replacement), repaired, flags=re.I)
+
+    return repaired
+
+
+def patch_numeric_sql(sql: str, table: str = DEFAULT_TABLE) -> str:
+    """
+    Fuerza agregaciones numéricas seguras en DuckDB:
+      SUM(creditos) -> SUM(TRY_CAST(... AS DOUBLE))
+      AVG(horas_practicas) -> AVG(TRY_CAST(... AS DOUBLE))
+    """
+    patched = str(sql or "")
+    cols = _table_column_names(table)
+
+    numeric_like = []
+    for c in cols:
+        n = _norm_identifier(c)
+        if (
+            "credito" in n
+            or "hora" in n
+            or n in {"ciclo", "semestre", "nivel", "orden", "cantidad", "total"}
+            or n.startswith("nro")
+            or n.startswith("num")
+        ):
+            numeric_like.append(c)
+
+    for c in [
+        "creditos",
+        "horas_teoricas",
+        "horas_practicas",
+        "horas_totales",
+        "horas_total",
+        "ciclo",
+    ]:
+        if c not in numeric_like:
+            numeric_like.append(c)
+
+    for col in sorted(set(numeric_like), key=len, reverse=True):
+        expr = _duckdb_numeric_expr(col)
+
+        for fn in ["SUM", "AVG", "MIN", "MAX"]:
+            patched = re.sub(
+                rf"\b{fn}\s*\(\s*{re.escape(col)}\s*\)",
+                f"{fn}({expr})",
+                patched,
+                flags=re.I,
+            )
+            patched = re.sub(
+                rf'\b{fn}\s*\(\s*"{re.escape(col)}"\s*\)',
+                f"{fn}({expr})",
+                patched,
+                flags=re.I,
+            )
+
+        for op in [">=", "<=", ">", "<"]:
+            patched = re.sub(
+                rf"\b{re.escape(col)}\s*{re.escape(op)}\s*('?\d+(?:[.,]\d+)?'?)",
+                lambda m, expr=expr, op=op: f"{expr} {op} {m.group(1)}",
+                patched,
+                flags=re.I,
+            )
+
+    return patched
+
+
+def chart_png_base64(df: pd.DataFrame, chart_type: str, x_col: Optional[str], y_col: Optional[str], title: str) -> Dict[str, Any]:
+    if df.empty:
+        raise HTTPException(status_code=422, detail="No hay filas para graficar.")
+
+    df = df.copy().head(500)
+    chart = (chart_type or "bar").lower().strip()
+
+    allowed = {
+        "bar",
+        "line",
+        "pie",
+        "horizontal_bar",
+        "scatter",
+        "area",
+        "histogram",
+        "boxplot",
+        "heatmap",
+    }
+
+    if chart not in allowed:
+        chart = "bar"
+
+    x, y = infer_chart_columns(df, x_col, y_col)
+
+    fig_width = max(8.0, min(16.0, 0.28 * min(len(df), 60) + 7.0))
+    fig, ax = plt.subplots(figsize=(fig_width, 5.6), dpi=140)
+
+    if chart == "scatter":
+        x = x_col if x_col in df.columns else "x" if "x" in df.columns else x
+        y = y_col if y_col in df.columns else "y" if "y" in df.columns else y
+        plot_df = df[[x, y]].copy()
+        plot_df[x] = pd.to_numeric(plot_df[x], errors="coerce")
+        plot_df[y] = pd.to_numeric(plot_df[y], errors="coerce")
+        plot_df = plot_df.dropna()
+        if plot_df.empty:
+            raise HTTPException(status_code=422, detail="Scatter requiere dos columnas numericas validas.")
+        ax.scatter(plot_df[x], plot_df[y], alpha=0.75)
+        ax.set_xlabel(x)
+        ax.set_ylabel(y)
+
+    elif chart == "histogram":
+        value_col = x_col if x_col in df.columns else "value" if "value" in df.columns else x
+        values = pd.to_numeric(df[value_col], errors="coerce").dropna()
+        if values.empty:
+            raise HTTPException(status_code=422, detail="Histogram requiere una columna numerica valida.")
+        ax.hist(values, bins=min(20, max(5, int(len(values) ** 0.5))), alpha=0.85)
+        ax.set_xlabel(value_col)
+        ax.set_ylabel("Frecuencia")
+
+    elif chart == "boxplot":
+        category_col = x_col if x_col in df.columns else "categoria" if "categoria" in df.columns else x
+        value_col = y_col if y_col in df.columns else "value" if "value" in df.columns else y
+        plot_df = df[[category_col, value_col]].copy()
+        plot_df[value_col] = pd.to_numeric(plot_df[value_col], errors="coerce")
+        plot_df = plot_df.dropna()
+        if plot_df.empty:
+            raise HTTPException(status_code=422, detail="Boxplot requiere categoria y columna numerica validas.")
+        groups = []
+        labels = []
+        for label, group in plot_df.groupby(category_col):
+            values = group[value_col].dropna()
+            if not values.empty:
+                labels.append(str(label))
+                groups.append(values)
+        if not groups:
+            raise HTTPException(status_code=422, detail="Boxplot no tiene grupos con datos numericos.")
+        ax.boxplot(groups, labels=labels, vert=True)
+        ax.set_xlabel(category_col)
+        ax.set_ylabel(value_col)
+        ax.tick_params(axis="x", labelrotation=40)
+
+    elif chart == "heatmap":
+        x = x_col if x_col in df.columns else "x" if "x" in df.columns else x
+        y = y_col if y_col in df.columns else "y" if "y" in df.columns else y
+        value_col = "value" if "value" in df.columns else infer_chart_columns(df, x, None)[1]
+        plot_df = df[[x, y, value_col]].copy()
+        plot_df[value_col] = pd.to_numeric(plot_df[value_col], errors="coerce")
+        plot_df = plot_df.dropna()
+        if plot_df.empty:
+            raise HTTPException(status_code=422, detail="Heatmap requiere columnas x, y y value validas.")
+        pivot = plot_df.pivot_table(index=y, columns=x, values=value_col, aggfunc="sum", fill_value=0)
+        im = ax.imshow(pivot.values, aspect="auto")
+        ax.set_xticks(range(len(pivot.columns)))
+        ax.set_xticklabels([str(c) for c in pivot.columns], rotation=40, ha="right")
+        ax.set_yticks(range(len(pivot.index)))
+        ax.set_yticklabels([str(i) for i in pivot.index])
+        ax.set_xlabel(x)
+        ax.set_ylabel(y)
+        fig.colorbar(im, ax=ax, label=value_col)
+
+    else:
+        y_values = pd.to_numeric(df[y], errors="coerce")
+        x_values = df[x].astype(str).fillna("")
+
+        if chart == "line":
+            ax.plot(x_values, y_values, marker="o")
+            ax.set_xlabel(x)
+            ax.set_ylabel(y)
+
+        elif chart == "area":
+            ax.fill_between(range(len(x_values)), y_values.fillna(0), alpha=0.35)
+            ax.plot(range(len(x_values)), y_values.fillna(0), marker="o")
+            ax.set_xticks(range(len(x_values)))
+            ax.set_xticklabels(x_values, rotation=40, ha="right")
+            ax.set_xlabel(x)
+            ax.set_ylabel(y)
+
+        elif chart == "pie":
+            pie_df = pd.DataFrame({"x": x_values, "y": y_values}).dropna().head(12)
+            if pie_df.empty:
+                raise HTTPException(status_code=422, detail="La columna numerica no tiene datos para pie chart.")
+            ax.pie(pie_df["y"], labels=pie_df["x"], autopct="%1.1f%%")
+            ax.axis("equal")
+
+        elif chart == "horizontal_bar":
+            ax.barh(x_values, y_values)
+            ax.set_xlabel(y)
+            ax.set_ylabel(x)
+
+        else:
+            ax.bar(x_values, y_values)
+            ax.set_xlabel(x)
+            ax.set_ylabel(y)
+            ax.tick_params(axis="x", labelrotation=40)
+
+    ax.set_title(title or "Reporte curricular")
+
+    if chart not in {"pie", "heatmap"}:
+        ax.grid(True, axis="y", alpha=0.25)
+
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+
+    return {
+        "image_base64": base64.b64encode(buf.read()).decode("ascii"),
+        "mime_type": "image/png",
+        "x_column": x,
+        "y_column": y,
+        "chart_type": chart,
+    }
+
+
+def normalize_delimiter_value(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if raw == "":
+        return None
+    aliases = {
+        "auto": None,
+        "coma": ",",
+        "comma": ",",
+        ",": ",",
+        "punto y coma": ";",
+        "semicolon": ";",
+        ";": ";",
+        "pipe": "|",
+        "barra": "|",
+        "|": "|",
+        "tab": "\t",
+        "tabulador": "\t",
+        "\\t": "\t",
+        "espacio": " ",
+        "space": " ",
+    }
+    lowered = raw.lower()
+    if lowered in aliases:
+        return aliases[lowered]
+    return raw[0]
+
+
+
+def normalize_duckdb_encoding(enc: Optional[str]) -> str:
+    """Normalize common UI/Python encoding aliases to values accepted by DuckDB CSV reader.
+
+    DuckDB accepts CP1252 or windows-1252-2000, but not always the common
+    Python alias windows-1252. Passing the unsupported alias makes import fail
+    before retrying the real CSV dialect.
+    """
+    value = (enc or "utf-8").strip()
+    key = value.lower().replace("_", "-")
+    aliases = {
+        "windows-1252": "CP1252",
+        "windows1252": "CP1252",
+        "cp-1252": "CP1252",
+        "cp1252": "CP1252",
+        "latin1": "latin-1",
+        "latin-1": "latin-1",
+        "iso-8859-1": "ISO_8859_1",
+        "iso8859-1": "ISO_8859_1",
+        "utf8": "utf-8",
+        "utf-8-sig": "utf-8",
+    }
+    return aliases.get(key, value)
+
+def detect_encoding(file_path: str) -> str:
+    data = Path(file_path).read_bytes()[:262144]
+    if data.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
+        return "utf-16"
+    for enc in ["utf-8", "utf-8-sig", "latin-1", "windows-1252"]:
+        try:
+            data.decode(enc)
+            return enc
+        except Exception:
+            continue
+    return "latin-1"
+
+
+def detect_delimiter(file_path: str, encoding: Optional[str] = None) -> str:
+    enc = encoding or detect_encoding(file_path)
+    try:
+        with open(file_path, "r", encoding=enc, errors="replace", newline="") as fh:
+            sample = fh.read(262144)
+        # csv.Sniffer works well on clean files, but large institutional exports often have
+        # broken quotes. Keep a manual fallback based on stable separator counts.
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|", " "])
+            if dialect.delimiter:
+                return dialect.delimiter
+        except Exception:
+            pass
+        lines = [ln for ln in sample.splitlines() if ln.strip()][:100]
+        candidates = [",", ";", "\t", "|"]
+        best = ","
+        best_score = -1.0
+        for cand in candidates:
+            counts = [ln.count(cand) for ln in lines]
+            positives = [c for c in counts if c > 0]
+            if not positives:
+                continue
+            avg = sum(positives) / len(positives)
+            variance = sum((c - avg) ** 2 for c in positives) / max(len(positives), 1)
+            score = avg * len(positives) - variance * 0.3
+            if score > best_score:
+                best_score = score
+                best = cand
+        return best
+    except Exception:
+        return ","
+
+
+def csv_read_kwargs(file_path: str, delimiter: Optional[str] = None, encoding: Optional[str] = None, chunksize: Optional[int] = None, nrows: Optional[int] = None) -> Dict[str, Any]:
+    enc = encoding or detect_encoding(file_path)
+    sep = normalize_delimiter_value(delimiter) or detect_delimiter(file_path, enc)
+    kwargs: Dict[str, Any] = {
+        "dtype": str,
+        "keep_default_na": False,
+        "sep": sep,
+        "encoding": enc,
+        "engine": "python",
+        "on_bad_lines": "skip",
+    }
+    if chunksize is not None:
+        kwargs["chunksize"] = chunksize
+    if nrows is not None:
+        kwargs["nrows"] = nrows
+    return kwargs
+
+
+def recommend_columns(cols: List[str], stats: List[Dict[str, Any]]) -> Dict[str, Any]:
+    by_name = {normalize_column(s.get("name", "")): s for s in stats}
+    col_by_norm = {normalize_column(c): c for c in cols}
+    def has_any(col: str, words: List[str]) -> bool:
+        n = normalize_column(col)
+        return any(w in n for w in words)
+    metadata_words = ["id", "codigo", "cod", "facultad", "escuela", "programa", "carrera", "plan", "periodo", "semestre", "ciclo", "credito", "estado", "modalidad", "sede"]
+    text_words = ["curso", "asignatura", "sumilla", "competencia", "resultado", "aprendizaje", "contenido", "unidad", "tema", "evaluacion", "bibliografia", "descripcion", "perfil", "capacidad"]
+    metadata_cols = [c for c in cols if has_any(c, metadata_words)]
+    text_cols = [c for c in cols if has_any(c, text_words)]
+    if not text_cols:
+        text_cols = [s["name"] for s in stats if float(s.get("avg_length", 0)) >= 30][:12]
+    rag = {
+        "silabos_general": text_cols[:12] or cols[:8],
+        "silabos_competencias": [c for c in cols if has_any(c, ["competencia", "resultado", "aprendizaje", "capacidad", "logro", "perfil"])],
+        "silabos_sumillas": [c for c in cols if has_any(c, ["sumilla", "descripcion", "presentacion", "curso", "asignatura"])],
+        "silabos_contenidos": [c for c in cols if has_any(c, ["contenido", "unidad", "tema", "sesion", "semana", "actividad", "programacion"])],
+        "silabos_bibliografia": [c for c in cols if has_any(c, ["bibliografia", "referencia", "libro", "articulo", "recurso", "fuente"])],
+    }
+    for k, v in list(rag.items()):
+        if not v:
+            rag[k] = text_cols[:8] or cols[:8]
+    filter_cols = []
+    for c in metadata_cols:
+        st = by_name.get(normalize_column(c), {})
+        unique = int(st.get("unique_sample", 999999) or 999999)
+        if unique <= 5000 or has_any(c, ["id", "codigo"]):
+            filter_cols.append(c)
+    return {
+        "metadata_columns": metadata_cols[:20],
+        "filter_columns": filter_cols[:20],
+        "text_columns": text_cols[:20],
+        "rag_collections": rag,
+    }
+
+
+def profile_csv_file(file_path: str, delimiter: Optional[str] = None, sample_rows: int = 5000, encoding: Optional[str] = None) -> Dict[str, Any]:
+    path = Path(file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"No existe el CSV: {file_path}")
+    enc = encoding or detect_encoding(str(path))
+    delim = normalize_delimiter_value(delimiter) or detect_delimiter(str(path), enc)
+    nrows = max(100, min(int(sample_rows or 5000), 50000))
+    started = time.time()
+    read_kwargs: Dict[str, Any] = csv_read_kwargs(str(path), delim, enc, nrows=nrows)
+    try:
+        df = pd.read_csv(str(path), **read_kwargs)
+    except Exception as exc:
+        # Last-resort retry with common delimiters and permissive encodings.
+        last_error = exc
+        df = None
+        for enc_try in [enc, "utf-8-sig", "latin-1", "windows-1252"]:
+            for delim_try in [delim, ";", ",", "|", "\t"]:
+                try:
+                    kw = csv_read_kwargs(str(path), delim_try, enc_try, nrows=nrows)
+                    df = pd.read_csv(str(path), **kw)
+                    enc, delim = enc_try, delim_try
+                    break
+                except Exception as e2:
+                    last_error = e2
+            if df is not None:
+                break
+        if df is None:
+            raise HTTPException(status_code=422, detail=f"No se pudo perfilar el CSV. Revisa delimitador/codificacion: {last_error}")
+    cols = list(df.columns)
+    stats: List[Dict[str, Any]] = []
+    for c in cols:
+        s = df[c].astype(str)
+        non_empty = s.map(lambda x: x.strip() != "").sum()
+        lengths = s.map(len)
+        stats.append({
+            "name": c,
+            "normalized_name": normalize_column(c),
+            "sample_non_empty": int(non_empty),
+            "non_empty_pct": round(float(non_empty) * 100.0 / max(len(df), 1), 2),
+            "unique_sample": int(s.nunique(dropna=False)),
+            "avg_length": round(float(lengths.mean()) if len(lengths) else 0.0, 2),
+            "max_length": int(lengths.max()) if len(lengths) else 0,
+            "semantic_hint": "text" if float(lengths.mean() if len(lengths) else 0) >= 50 else "filter",
+        })
+    # Estimate rows using average serialized sample row size. This is approximate but avoids scanning 700MB.
+    sample_csv = df.head(min(len(df), 1000)).to_csv(index=False, sep=delim)
+    avg_row_bytes = max(1.0, (len(sample_csv.encode("utf-8", errors="ignore")) / max(min(len(df), 1000), 1)))
+    estimated_rows = int(path.stat().st_size / avg_row_bytes) if path.stat().st_size else len(df)
+    rec = recommend_columns(cols, stats)
+    warnings = []
+    if path.stat().st_size >= 600 * 1024 * 1024:
+        warnings.append("Archivo grande detectado: usa DuckDB y RAG por jobs; evita importacion SQLite completa salvo muestra.")
+    if len(cols) > 120:
+        warnings.append("Muchas columnas: revisa text_columns antes de crear RAG completo para reducir ruido.")
+    if not rec["text_columns"]:
+        warnings.append("No se detectaron columnas textuales obvias; valida manualmente columnas para RAG.")
+    return {
+        "ok": True,
+        "file": {
+            "path": str(path),
+            "exists": True,
+            "size_bytes": path.stat().st_size,
+            "size_mb": round(path.stat().st_size / 1024 / 1024, 2),
+        },
+        "delimiter": "\t" if delim == "	" else delim,
+        "encoding": enc,
+        "sample_rows": int(len(df)),
+        "estimated_rows": estimated_rows,
+        "columns_count": len(cols),
+        "columns": cols,
+        "stats": stats,
+        "recommendations": rec,
+        "warnings": warnings,
+        "seconds": round(time.time() - started, 3),
+    }
+
+
+def collection_column_configs(cols: List[str]) -> Dict[str, List[str]]:
+    rec = recommend_columns(cols, [{"name": c, "avg_length": 0, "unique_sample": 0} for c in cols])
+    return rec["rag_collections"]
+
+
+def safe_collection_name(name: str) -> str:
+    n = normalize_column(name)[:60]
+    return n or "silabos"
+
+
+
+JOBS_LOCK = threading.Lock()
+JOBS: Dict[str, Dict[str, Any]] = {}
+
+
+def _json_default(value: Any) -> str:
+    return str(value)
+
+
+def jobs_file() -> Path:
+    ensure_dirs()
+    return Path(JOBS_PATH) / "jobs.json"
+
+
+def load_jobs() -> None:
+    global JOBS
+    jf = jobs_file()
+    if jf.is_file():
+        try:
+            data = json.loads(jf.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                JOBS = data
+        except Exception:
+            JOBS = {}
+
+
+def save_jobs() -> None:
+    jf = jobs_file()
+    tmp = jf.with_suffix(".tmp")
+    tmp.write_text(json.dumps(JOBS, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")
+    tmp.replace(jf)
+
+
+def now_str() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+@api.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> Dict[str, Any]:
+    if job_id not in JOBS:
+        return {
+            "ok": False,
+            "message": "Job no encontrado",
+            "job_id": job_id
+        }
+
+    update_job(
+        job_id,
+        status="cancelled",
+        progress=100,
+        log="Job cancelado manualmente por el usuario."
+    )
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": "cancelled"
+    }
+
+
+@api.post("/jobs/cancel-all")
+def cancel_all_jobs() -> Dict[str, Any]:
+    cancelled = 0
+
+    for job_id, job in JOBS.items():
+        if job.get("status") in ["queued", "running"]:
+            update_job(
+                job_id,
+                status="cancelled",
+                progress=100,
+                log="Job cancelado manualmente por el usuario."
+            )
+            cancelled += 1
+
+    return {
+        "ok": True,
+        "cancelled": cancelled
+    }
+
+
+def update_job(job_id: str, **fields: Any) -> None:
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return
+        if "log" in fields:
+            log_value = fields.pop("log")
+            logs = job.setdefault("logs", [])
+            if isinstance(log_value, list):
+                logs.extend([str(x) for x in log_value])
+            else:
+                logs.append(str(log_value))
+            job["logs"] = logs[-120:]
+        job.update(fields)
+        save_jobs()
+
+
+def start_job(kind: str, label: str, payload: Dict[str, Any], target: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    load_jobs()
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "id": job_id,
+        "kind": kind,
+        "label": label,
+        "status": "queued",
+        "progress": 0,
+        "payload": payload,
+        "result": None,
+        "error": None,
+        "logs": [f"{now_str()} - Trabajo en cola: {label}"],
+        "created_at": now_str(),
+        "started_at": None,
+        "finished_at": None,
+    }
+    with JOBS_LOCK:
+        JOBS[job_id] = job
+        save_jobs()
+
+    def runner() -> None:
+        update_job(job_id, status="running", started_at=now_str(), progress=5, log=f"{now_str()} - Iniciando {label}")
+        try:
+            result = target(job_id)
+            update_job(job_id, status="success", progress=100, result=result, finished_at=now_str(), log=f"{now_str()} - Finalizado correctamente")
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, ensure_ascii=False)
+            update_job(job_id, status="error", error=detail, finished_at=now_str(), log=f"{now_str()} - Error: {detail}")
+        except Exception as exc:
+            update_job(job_id, status="error", error=str(exc), finished_at=now_str(), log=f"{now_str()} - Error: {exc}")
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    return {"ok": True, "job": job}
+
+
+load_jobs()
+
+
+class PullModelRequest(BaseModel):
+    model: str = Field(default="qwen2.5-coder:3b")
+
+
+class DuckImportRequest(BaseModel):
+    file_path: str = Field(default="/data/syllabi/silabos.csv")
+    table: str = Field(default=DEFAULT_TABLE)
+    delimiter: Optional[str] = Field(default=None)
+    encoding: Optional[str] = Field(default=None)
+    quote: Optional[str] = Field(default='"')
+    escape: Optional[str] = Field(default='"')
+    skip_rows: int = Field(default=0, ge=0, le=100000)
+    header: bool = Field(default=True)
+    null_padding: bool = Field(default=True)
+    strict_mode: bool = Field(default=False)
+    max_line_size: int = Field(default=10000000, ge=100000, le=100000000)
+    replace: bool = Field(default=True)
+    sample_size: int = Field(default=20000, ge=100, le=1000000)
+    normalize_columns: bool = Field(default=True)
+
+
+class DuckQueryRequest(BaseModel):
+    sql: str
+    limit: int = Field(default=100, ge=1, le=MAX_QUERY_LIMIT)
+
+
+class IntentResolveRequest(BaseModel):
+    question: str
+    table: str = Field(default=DEFAULT_TABLE)
+
+class SemanticProposalRequest(BaseModel):
+    text: str
+    institution_profile: str = Field(default="adventista")
+    artifact_type: str = Field(default="auto")
+    template_code: str = Field(default="auto")
+
+class TemplateRenderRequest(BaseModel):
+    template_code: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+class ChartRequest(BaseModel):
+    sql: str
+    chart_type: str = Field(default="bar")
+    title: str = Field(default="Reporte curricular")
+    x: Optional[str] = Field(default=None)
+    y: Optional[str] = Field(default=None)
+    limit: int = Field(default=100, ge=1, le=MAX_CHART_ROWS)
+
+
+class RagBuildRequest(BaseModel):
+    file_path: str = Field(default="/data/syllabi/silabos.csv")
+    collection: str = Field(default="silabos")
+    delimiter: Optional[str] = Field(default=None)
+    encoding: Optional[str] = Field(default=None)
+    chunk_size_rows: int = Field(default=1000, ge=50, le=50000)
+    row_limit: int = Field(default=0, ge=0)
+    text_columns: List[str] = Field(default_factory=list)
+    metadata_columns: List[str] = Field(default_factory=list)
+    document_chars: int = Field(default=1300, ge=400, le=5000)
+    overlap_chars: int = Field(default=150, ge=0, le=1000)
+    embed_batch_size: int = Field(default=16, ge=1, le=64)
+    reset_collection: bool = Field(default=False)
+
+
+class RagSearchRequest(BaseModel):
+    query: str
+    collection: str = Field(default="silabos")
+    n_results: int = Field(default=5, ge=1, le=20)
+
+
+
+class CsvProfileRequest(BaseModel):
+    file_path: str = Field(default="/data/syllabi/silabos.csv")
+    delimiter: Optional[str] = Field(default=None)
+    encoding: Optional[str] = Field(default=None)
+    sample_rows: int = Field(default=5000, ge=100, le=50000)
+
+
+class RagCollectionsRequest(BaseModel):
+    file_path: str = Field(default="/data/syllabi/silabos.csv")
+    collection_prefix: str = Field(default="silabos")
+    delimiter: Optional[str] = Field(default=None)
+    encoding: Optional[str] = Field(default=None)
+    chunk_size_rows: int = Field(default=1000, ge=50, le=50000)
+    row_limit: int = Field(default=0, ge=0)
+    metadata_columns: List[str] = Field(default_factory=list)
+    document_chars: int = Field(default=1300, ge=400, le=5000)
+    overlap_chars: int = Field(default=150, ge=0, le=1000)
+    embed_batch_size: int = Field(default=16, ge=1, le=64)
+    reset_collections: bool = Field(default=False)
+    collections: List[str] = Field(default_factory=list)
+
+
+@api.get("/health")
+def health() -> Dict[str, Any]:
+    ensure_dirs()
+    duck_exists = Path(DUCKDB_PATH).exists()
+    try:
+        ollama = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5).ok
+    except Exception:
+        ollama = False
+    return {
+        "ok": True,
+        "service": "upeu-silabo-data-engine",
+        "version": "3.0.0",
+        "duckdb_path": DUCKDB_PATH,
+        "duckdb_exists": duck_exists,
+        "chroma_path": CHROMA_PATH,
+        "jobs_path": JOBS_PATH,
+        "chroma_available": chromadb is not None,
+        "ollama_reachable": ollama,
+        "embed_model": EMBED_MODEL,
+        "max_query_limit": MAX_QUERY_LIMIT,
+        "max_chart_rows": MAX_CHART_ROWS,
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@api.get("/fs/status")
+def fs_status(file_path: str = "/data/syllabi/silabos.csv", collection: str = "silabos") -> Dict[str, Any]:
+    ensure_dirs()
+    csv = Path(file_path)
+    duck = Path(DUCKDB_PATH)
+    collection_count = None
+    collection_counts: Dict[str, Optional[int]] = {}
+    if chromadb is not None:
+        try:
+            c = chroma_collection(collection)
+            collection_count = c.count()
+        except Exception:
+            collection_count = None
+        for cname in ["silabos", "silabos_general", "silabos_competencias", "silabos_sumillas", "silabos_contenidos", "silabos_bibliografia"]:
+            try:
+                collection_counts[cname] = chroma_collection(cname).count()
+            except Exception:
+                collection_counts[cname] = None
+    return {
+        "ok": True,
+        "csv": {
+            "path": str(csv),
+            "exists": csv.is_file(),
+            "size_bytes": csv.stat().st_size if csv.is_file() else 0,
+            "size_mb": round(csv.stat().st_size / 1024 / 1024, 2) if csv.is_file() else 0,
+        },
+        "duckdb": {
+            "path": str(duck),
+            "exists": duck.is_file(),
+            "size_bytes": duck.stat().st_size if duck.is_file() else 0,
+            "size_mb": round(duck.stat().st_size / 1024 / 1024, 2) if duck.is_file() else 0,
+            "tables": list_tables() if duck.is_file() else [],
+        },
+        "chroma": {
+            "path": CHROMA_PATH,
+            "available": chromadb is not None,
+            "collection": collection,
+            "collection_count": collection_count,
+            "collection_counts": collection_counts,
+        },
+    }
+
+
+@api.get("/fs/syllabi-files")
+def syllabi_files() -> Dict[str, Any]:
+    base = Path(SYLLABI_PATH)
+    base.mkdir(parents=True, exist_ok=True)
+    items = []
+    for p in sorted(base.glob("*.csv"), key=lambda x: x.stat().st_mtime if x.exists() else 0, reverse=True):
+        st = p.stat()
+        items.append({
+            "name": p.name,
+            "path": str(p),
+            "size_bytes": st.st_size,
+            "size_mb": round(st.st_size / 1024 / 1024, 2),
+            "modified_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)),
+        })
+    return {"ok": True, "directory": str(base), "files": items}
+
+
+@api.post("/csv/profile")
+def csv_profile(req: CsvProfileRequest) -> Dict[str, Any]:
+    return profile_csv_file(req.file_path, req.delimiter, req.sample_rows, req.encoding)
+
+
+@api.get("/jobs")
+def list_jobs(limit: int = 20) -> Dict[str, Any]:
+    load_jobs()
+    items = sorted(JOBS.values(), key=lambda j: j.get("created_at", ""), reverse=True)[: max(1, min(limit, 100))]
+    return {"ok": True, "jobs": items}
+
+
+@api.get("/jobs/{job_id}")
+def get_job(job_id: str) -> Dict[str, Any]:
+    load_jobs()
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="No existe el trabajo solicitado.")
+    return {"ok": True, "job": job}
+
+
+@api.post("/jobs/duckdb-import")
+def duck_import_job(req: DuckImportRequest) -> Dict[str, Any]:
+    payload = req.dict()
+    def target(job_id: str) -> Dict[str, Any]:
+        update_job(job_id, progress=10, log="Validando archivo CSV y creando tabla DuckDB.")
+        result = duck_import(req)
+        update_job(job_id, progress=95, log=f"DuckDB listo: {result.get('rows', 0)} filas.")
+        return result
+    return start_job("duckdb_import", "Convertir CSV a DuckDB", payload, target)
+
+
+@api.post("/jobs/rag-build")
+def rag_build_job(req: RagBuildRequest) -> Dict[str, Any]:
+    payload = req.dict()
+    def target(job_id: str) -> Dict[str, Any]:
+        update_job(job_id, progress=10, log="Preparando ChromaDB y embeddings. Este proceso puede tardar en CSV grandes.")
+        result = rag_build(req, job_id=job_id)
+        update_job(job_id, progress=95, log=f"RAG listo: {result.get('documents_indexed', 0)} fragmentos.")
+        return result
+    return start_job("rag_build", "Construir indice RAG", payload, target)
+
+
+
+@api.post("/jobs/rag-build-collections")
+def rag_build_collections_job(req: RagCollectionsRequest) -> Dict[str, Any]:
+    payload = req.dict()
+    def target(job_id: str) -> Dict[str, Any]:
+        update_job(job_id, progress=8, log="Preparando RAG por colecciones curriculares.")
+        result = rag_build_collections(req, job_id=job_id)
+        update_job(job_id, progress=95, log="RAG por colecciones finalizado.")
+        return result
+    return start_job("rag_build_collections", "Construir RAG por colecciones", payload, target)
+
+
+@api.post("/jobs/ollama-pull")
+def ollama_pull_job(req: PullModelRequest) -> Dict[str, Any]:
+    model = (req.model or "").strip()
+    if not model:
+        raise HTTPException(status_code=422, detail="Indica el modelo Ollama.")
+    payload = {"model": model}
+    def target(job_id: str) -> Dict[str, Any]:
+        update_job(job_id, progress=8, log=f"Solicitando descarga de modelo: {model}")
+        r = requests.post(f"{OLLAMA_BASE_URL}/api/pull", json={"model": model, "stream": True}, stream=True, timeout=3600)
+        if r.status_code >= 400:
+            raise RuntimeError(f"Ollama respondio HTTP {r.status_code}: {r.text[:500]}")
+        last: Dict[str, Any] = {}
+        for raw in r.iter_lines():
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except Exception:
+                continue
+            last = data
+            status = str(data.get("status", "descargando"))
+            total = data.get("total") or 0
+            completed = data.get("completed") or 0
+            progress = 20
+            if total:
+                progress = max(20, min(95, int((float(completed) / float(total)) * 90)))
+            update_job(job_id, progress=progress, log=f"{model}: {status}")
+        return {"ok": True, "model": model, "message": "Modelo disponible en Ollama.", "last": last}
+    return start_job("ollama_pull", f"Descargar modelo {model}", payload, target)
+
+
+
+
+
+
+TEMPLATE_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "PLAN_ESTUDIOS_SUNEDU_V1": {
+        "name": "Plan de estudios SUNEDU compatible",
+        "artifact_type": "plan_estudios",
+        "sections": ["datos_generales", "fundamento_curricular", "perfil_egreso", "competencias", "malla_por_ciclos", "creditos_y_horas", "lineamientos_evaluacion", "evidencias"],
+    },
+    "MALLA_CURRICULAR_V1": {
+        "name": "Malla curricular por ciclos",
+        "artifact_type": "malla_curricular",
+        "sections": ["programa", "ciclos", "areas_formacion", "cursos", "creditos", "horas", "prerrequisitos", "cumplimiento_normativo"],
+    },
+    "SILABO_UPeU_V1": {
+        "name": "Sílabo académico UPeU",
+        "artifact_type": "silabo",
+        "sections": ["datos_curso", "sumilla", "competencia_asignatura", "resultados_aprendizaje", "unidades", "sesiones", "estrategias", "evaluacion", "referencias"],
+    },
+    "RECURSO_APRENDIZAJE_V1": {
+        "name": "Recurso de aprendizaje",
+        "artifact_type": "recurso_aprendizaje",
+        "sections": ["tipo_recurso", "proposito", "resultado_aprendizaje", "actividad", "materiales", "evaluacion", "referencias"],
+    },
+}
+
+SEMANTIC_DOMAINS: Dict[str, List[str]] = {
+    "planes_estudio": ["plan", "estudios", "perfil", "egreso", "competencia", "grado", "titulo", "creditos", "ciclos"],
+    "malla_curricular": ["malla", "curso", "ciclo", "creditos", "horas", "prerrequisito", "area", "formacion"],
+    "silabos": ["silabo", "sumilla", "unidad", "sesion", "resultado", "aprendizaje", "competencia", "referencias", "evaluacion"],
+    "recursos_aprendizaje": ["recurso", "lectura", "bibliografia", "url", "material", "actividad", "rubrica"],
+    "sunedu": ["sunedu", "licenciamiento", "condicion", "basica", "c1", "c2", "evidencia", "formato"],
+    "adventista": ["biblia", "adventista", "iasd", "elena", "white", "educacion", "servicio", "fe", "valores"],
+}
+
+NEW_AGE_TERMS = ["chakras", "karma", "reiki", "energia cosmica", "manifestacion", "universo conspira", "macabeos", "apocrifo", "apocrifos", "epigrafo", "epigrafos"]
+
+def _norm_text(value: str) -> str:
+    repl = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
+    value = str(value or "").lower().translate(repl)
+    value = re.sub(r"[^a-z0-9\s-]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+def _score_terms(text: str, terms: List[str]) -> Tuple[float, List[str]]:
+    hits = []
+    for term in terms:
+        nt = _norm_text(term)
+        if nt and nt in text:
+            hits.append(term)
+    return (round(len(hits) / max(1, len(terms)), 3), hits)
+
+def analyze_proposal_semantics(text: str, institution_profile: str = "adventista", artifact_type: str = "auto") -> Dict[str, Any]:
+    normalized = _norm_text(text)
+    if not normalized:
+        return {"ok": False, "message": "Texto vacío."}
+    domains = {}
+    all_hits = []
+    for domain, terms in SEMANTIC_DOMAINS.items():
+        score, hits = _score_terms(normalized, terms)
+        domains[domain] = {"score": score, "hits": hits}
+        all_hits.extend(hits)
+    if artifact_type == "auto":
+        best = max(["planes_estudio", "malla_curricular", "silabos", "recursos_aprendizaje"], key=lambda d: domains[d]["score"])
+        artifact_type = {"planes_estudio":"plan_estudios", "malla_curricular":"malla_curricular", "silabos":"silabo", "recursos_aprendizaje":"recurso_aprendizaje"}.get(best, "propuesta")
+    required_by_type = {
+        "plan_estudios": ["perfil", "competencia", "creditos", "ciclos", "malla", "evaluacion"],
+        "malla_curricular": ["ciclo", "curso", "creditos", "horas", "prerrequisito", "area"],
+        "silabo": ["sumilla", "competencia", "resultado", "unidad", "sesion", "evaluacion", "referencias"],
+        "recurso_aprendizaje": ["resultado", "actividad", "material", "evaluacion", "referencias"],
+    }
+    required = required_by_type.get(artifact_type, [])
+    missing = [t for t in required if _norm_text(t) not in normalized]
+    incompatible = [t for t in NEW_AGE_TERMS if _norm_text(t) in normalized]
+    coverage = 1.0 - (len(missing) / max(1, len(required)))
+    adventist_alignment = 1.0 if not incompatible else max(0.0, 1.0 - len(incompatible)*0.25)
+    sunedu_alignment = min(1.0, domains["sunedu"]["score"] + (0.25 if any(k in normalized for k in ["creditos", "horas", "perfil", "competencia"]) else 0.0))
+    overall = round((coverage * 0.45) + (adventist_alignment * 0.25) + (sunedu_alignment * 0.15) + (min(1.0, len(all_hits)/12) * 0.15), 3)
+    recommendations = []
+    if missing:
+        recommendations.append("Completar campos curriculares faltantes: " + ", ".join(missing[:8]) + ".")
+    if incompatible:
+        recommendations.append("Revisar lenguaje incompatible con el marco adventista/bíblico: " + ", ".join(incompatible) + ".")
+    if sunedu_alignment < 0.35:
+        recommendations.append("Agregar trazabilidad normativa: créditos, horas, competencias, evidencias y requisitos del formato aplicable.")
+    return {
+        "ok": True,
+        "mode": "semantic_proposal_analysis",
+        "artifact_type": artifact_type,
+        "confidence": overall,
+        "scores": {"coverage": round(coverage,3), "adventist_alignment": round(adventist_alignment,3), "sunedu_alignment": round(sunedu_alignment,3), "overall": overall},
+        "domains": domains,
+        "missing_elements": missing,
+        "incompatible_terms": incompatible,
+        "recommendations": recommendations,
+        "latency_profile": "heuristic_semantic_no_ollama",
+    }
+
+@api.get("/templates/list")
+def templates_list() -> Dict[str, Any]:
+    return {"ok": True, "templates": TEMPLATE_REGISTRY}
+
+@api.post("/templates/render")
+def templates_render(req: TemplateRenderRequest) -> Dict[str, Any]:
+    tpl = TEMPLATE_REGISTRY.get(req.template_code)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Plantilla no encontrada.")
+    payload = req.payload or {}
+    lines = [f"# {tpl['name']}", ""]
+    for section in tpl["sections"]:
+        title = section.replace("_", " ").title()
+        value = payload.get(section, "[Completar]")
+        lines.append(f"## {title}")
+        lines.append(str(value).strip() if str(value).strip() else "[Completar]")
+        lines.append("")
+    return {"ok": True, "template_code": req.template_code, "artifact_type": tpl["artifact_type"], "markdown": "\n".join(lines).strip()}
+
+@api.post("/semantic/analyze-proposal")
+def semantic_analyze_proposal(req: SemanticProposalRequest) -> Dict[str, Any]:
+    return analyze_proposal_semantics(req.text, req.institution_profile, req.artifact_type)
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+INTENT_ENGINE_MODE = os.getenv("INTENT_ENGINE_MODE", "auto").strip().lower()
+OLLAMA_INTENT_MODEL = os.getenv(
+    "OLLAMA_INTENT_MODEL",
+    os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
+).strip()
+FAST_INTENT_MIN_CONFIDENCE = _env_float("FAST_INTENT_MIN_CONFIDENCE", 0.90)
+OLLAMA_INTENT_TIMEOUT = _env_int("OLLAMA_INTENT_TIMEOUT", 180)
+
+
+def _norm_question(text: str) -> str:
+    value = str(text or "").lower()
+    repl = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
+    value = value.translate(repl)
+    value = re.sub(r"[^a-z0-9_ %.-]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _fast_result_is_weak(question: str, result: Dict[str, Any]) -> bool:
+    q = _norm_question(question)
+
+    confidence = float(result.get("confidence") or 0)
+    dimensions = result.get("dimensions") or []
+    filters = result.get("filters") or []
+    sql = str(result.get("sql") or "").lower()
+
+    if confidence < FAST_INTENT_MIN_CONFIDENCE:
+        return True
+
+    # Si el usuario pide escuela/carrera/programa/sistemas y el fast responde por facultad, es débil.
+    wants_program = any(x in q for x in [
+        "escuela",
+        "carrera",
+        "programa",
+        "programa de estudio",
+        "ingenieria de sistemas",
+        "sistemas"
+    ])
+
+    if wants_program and "facultad" in dimensions:
+        return True
+
+    if "sistemas" in q and "sistemas" not in sql and not filters:
+        return True
+
+    return False
+
+
+def _available_columns_for_prompt(table: str) -> List[str]:
+    try:
+        return [str(c.get("name")) for c in table_columns(table)]
+    except Exception:
+        return []
+
+
+def resolve_intent_with_ollama(question: str, table: str) -> Dict[str, Any]:
+    columns = _available_columns_for_prompt(table)
+
+    prompt = f"""
+Eres un generador seguro de consultas DuckDB para reportes académicos.
+
+Pregunta del usuario:
+{question}
+
+Tabla:
+{table}
+
+Columnas disponibles:
+{", ".join(columns)}
+
+Reglas obligatorias:
+- Devuelve SOLO JSON válido.
+- No uses markdown.
+- No inventes columnas.
+- Usa solo SELECT.
+- Para "escuela", "carrera" o "programa" usa programa_estudio si existe.
+- Para "ingeniería de sistemas" o "sistemas", filtra programa_estudio ILIKE '%Sistemas%' si la columna existe.
+- Para conteos usa COUNT(*) AS total.
+- Para gráficos usa mode="chart".
+- Si el usuario pide "por escuela", agrupa por programa_estudio.
+- Si el usuario pregunta "cuantos silabos tiene X", devuelve un conteo total filtrado, no agrupado por facultad.
+
+Formato JSON:
+{{
+  "ok": true,
+  "mode": "sql",
+  "report_intent": "count",
+  "chart_type": "bar",
+  "confidence": 0.95,
+  "table": "{table}",
+  "dimensions": [],
+  "metrics": [],
+  "filters": [],
+  "sql": "SELECT COUNT(*) AS total FROM {table}",
+  "x": null,
+  "y": "total",
+  "title": "Conteo de sílabos",
+  "engine": "ollama"
+}}
+""".strip()
+
+    payload = {
+        "model": OLLAMA_INTENT_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json"
+    }
+
+    r = requests.post(
+        f"{OLLAMA_BASE_URL}/api/generate",
+        json=payload,
+        timeout=OLLAMA_INTENT_TIMEOUT
+    )
+    r.raise_for_status()
+
+    raw = r.json().get("response", "{}")
+    data = json.loads(raw)
+
+    if not isinstance(data, dict):
+        raise RuntimeError("Ollama no devolvio un objeto JSON.")
+
+    data["engine"] = "ollama"
+    data["ok"] = True
+    return data
+
+
+def resolve_intent_by_policy(question: str, table: str) -> Dict[str, Any]:
+    mode = INTENT_ENGINE_MODE if INTENT_ENGINE_MODE in {"fast", "ollama", "auto"} else "auto"
+
+    if mode == "fast":
+        result = resolve_intent(question, table, table_columns, list_tables)
+        result["engine"] = "fast"
+        return result
+
+    if mode == "ollama":
+        return resolve_intent_with_ollama(question, table)
+
+    # auto
+    fast_result = resolve_intent(question, table, table_columns, list_tables)
+    fast_result["engine"] = "fast"
+
+    if not _fast_result_is_weak(question, fast_result):
+        return fast_result
+
+    try:
+        result = resolve_intent_with_ollama(question, table)
+        result["fallback_from"] = "fast"
+        return result
+    except Exception as exc:
+        fast_result["engine"] = "fast_fallback"
+        fast_result["ollama_error"] = str(exc)
+        return fast_result
+
+
+@api.post("/intent/resolve")
+def intent_resolve(req: IntentResolveRequest) -> Dict[str, Any]:
+    question = (req.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="La pregunta esta vacia.")
+
+    table = req.table or DEFAULT_TABLE
+    result = resolve_intent_by_policy(question, table)
+
+    sql = result.get("sql")
+    if sql:
+        result["sql"] = patch_numeric_sql(repair_sql_for_table(safe_select_sql(str(sql)), req.table or DEFAULT_TABLE), req.table or DEFAULT_TABLE)
+
+    return result
+
+
+@api.get("/duckdb/tables")
+def duck_tables() -> Dict[str, Any]:
+    return {"ok": True, "tables": list_tables()}
+
+
+@api.get("/duckdb/schema")
+def duck_schema(table: str = DEFAULT_TABLE) -> Dict[str, Any]:
+    return {"ok": True, "table": table, "columns": table_columns(table), "tables": list_tables()}
+
+
+@api.post("/duckdb/import")
+def duck_import(req: DuckImportRequest) -> Dict[str, Any]:
+    path = Path(req.file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"No existe el CSV: {req.file_path}")
+    table_q = q_ident(req.table)
+    sample = int(req.sample_size)
+    detected_encoding = req.encoding or detect_encoding(str(path))
+    detected_delim = normalize_delimiter_value(req.delimiter) or detect_delimiter(str(path), detected_encoding)
+    started = time.time()
+    cx = con()
+    last_error: Optional[Exception] = None
+
+    def duck_opts(delim: str, encoding: str, use_auto: bool = False) -> List[str]:
+        opts = [
+            f"header={'true' if req.header else 'false'}",
+            "ignore_errors=true",
+            "union_by_name=true",
+            "all_varchar=true",
+            f"sample_size={sample}",
+            f"delim={q_str(delim)}",
+            f"encoding={q_str(normalize_duckdb_encoding(encoding))}",
+            f"null_padding={'true' if req.null_padding else 'false'}",
+            f"strict_mode={'true' if req.strict_mode else 'false'}",
+            f"max_line_size={int(req.max_line_size)}",
+        ]
+        if req.skip_rows:
+            opts.append(f"skip={int(req.skip_rows)}")
+        if req.quote is not None and str(req.quote) != "":
+            opts.append(f"quote={q_str(str(req.quote)[0])}")
+        if req.escape is not None and str(req.escape) != "":
+            opts.append(f"escape={q_str(str(req.escape)[0])}")
+        return opts
+
+    def read_expr_for(delim: str, encoding: str, use_auto: bool = False) -> str:
+        func = "read_csv_auto" if use_auto else "read_csv"
+        return f"{func}({q_str(str(path))}, {', '.join(duck_opts(delim, encoding, use_auto))})"
+
+    delimiter_candidates: List[str] = []
+    for d in [detected_delim, ";", ",", "|", "\t"]:
+        if d and d not in delimiter_candidates:
+            delimiter_candidates.append(d)
+    encoding_candidates: List[str] = []
+    for e in [detected_encoding, normalize_duckdb_encoding(detected_encoding), "utf-8", "latin-1", "ISO_8859_1", "CP1252", "windows-1252-2000"]:
+        if e and e not in encoding_candidates:
+            encoding_candidates.append(e)
+
+    try:
+        cx.execute("PRAGMA threads=4")
+        cx.execute("PRAGMA preserve_insertion_order=false")
+        if req.replace:
+            cx.execute(f"DROP TABLE IF EXISTS {table_q}")
+        created = False
+        used_delim = detected_delim
+        used_encoding = detected_encoding
+        used_reader = "read_csv"
+        for enc_try in encoding_candidates:
+            for delim_try in delimiter_candidates:
+                for use_auto in [False, True]:
+                    try:
+                        expr = read_expr_for(delim_try, enc_try, use_auto)
+                        cx.execute(f"CREATE TABLE {table_q} AS SELECT * FROM {expr}")
+                        created = True
+                        used_delim = delim_try
+                        used_encoding = normalize_duckdb_encoding(enc_try)
+                        used_reader = "read_csv_auto" if use_auto else "read_csv"
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        try:
+                            cx.execute(f"DROP TABLE IF EXISTS {table_q}")
+                        except Exception:
+                            pass
+                if created:
+                    break
+            if created:
+                break
+        if not created:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "DuckDB no pudo leer el CSV incluso con modo tolerante. "
+                    "Prueba indicar delimitador, encoding, saltar lineas iniciales o revisar filas con comillas rotas. "
+                    f"Ultimo error: {last_error}"
+                ),
+            )
+        if req.normalize_columns:
+            cols = [r[1] for r in cx.execute(f"PRAGMA table_info({q_str(req.table)})").fetchall()]
+            new_cols = unique_columns(cols)
+            for old, new in zip(cols, new_cols):
+                if old != new:
+                    cx.execute(f"ALTER TABLE {table_q} RENAME COLUMN {q_ident(old)} TO {q_ident(new)}")
+        total = cx.execute(f"SELECT COUNT(*) FROM {table_q}").fetchone()[0]
+        cols_final = [r[1] for r in cx.execute(f"PRAGMA table_info({q_str(req.table)})").fetchall()]
+    finally:
+        cx.close()
+    return {
+        "ok": True,
+        "message": "CSV convertido a DuckDB correctamente.",
+        "table": req.table,
+        "rows": int(total),
+        "columns": cols_final,
+        "seconds": round(time.time() - started, 2),
+        "duckdb_path": DUCKDB_PATH,
+        "csv_dialect": {
+            "delimiter": "\\t" if used_delim == "\t" else used_delim,
+            "encoding": used_encoding,
+            "reader": used_reader,
+            "strict_mode": req.strict_mode,
+            "null_padding": req.null_padding,
+            "max_line_size": req.max_line_size,
+        },
+    }
+
+
+@api.post("/duckdb/query")
+def duck_query(req: DuckQueryRequest) -> Dict[str, Any]:
+    sql = patch_numeric_sql(repair_sql_for_table(safe_select_sql(req.sql), DEFAULT_TABLE), DEFAULT_TABLE)
+    limit = min(int(req.limit), MAX_QUERY_LIMIT)
+    wrapped = f"SELECT * FROM ({sql}) AS q LIMIT {limit}"
+    started = time.time()
+    cx = con()
+    try:
+        cur = cx.execute(wrapped)
+        rows = cur.fetchall()
+        result = rows_to_dicts(cur, rows)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "DuckDB no pudo ejecutar la consulta.",
+                "error": str(exc),
+                "sql": sql,
+                "columns": _table_column_names(DEFAULT_TABLE),
+            },
+        )
+    finally:
+        cx.close()
+
+    return {
+        "ok": True,
+        "sql": sql,
+        "limit": limit,
+        "rows": result,
+        "row_count": len(result),
+        "seconds": round(time.time() - started, 3),
+    }
+
+
+@api.post("/duckdb/chart")
+def duck_chart(req: ChartRequest) -> Dict[str, Any]:
+    sql = patch_numeric_sql(repair_sql_for_table(safe_select_sql(req.sql), DEFAULT_TABLE), DEFAULT_TABLE)
+    limit = min(int(req.limit), MAX_CHART_ROWS)
+    wrapped = f"SELECT * FROM ({sql}) AS q LIMIT {limit}"
+    started = time.time()
+    cx = con()
+
+    try:
+        df = cx.execute(wrapped).fetchdf()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "DuckDB no pudo generar el dataset del gráfico.",
+                "error": str(exc),
+                "sql": sql,
+                "columns": _table_column_names(DEFAULT_TABLE),
+            },
+        )
+    finally:
+        cx.close()
+
+    try:
+        chart = chart_png_base64(df, req.chart_type, req.x, req.y, req.title)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "No se pudo renderizar el gráfico.",
+                "error": str(exc),
+                "sql": sql,
+                "rows": df.head(20).where(pd.notnull(df), None).to_dict(orient="records"),
+            },
+        )
+
+    rows = df.head(200).where(pd.notnull(df), None).to_dict(orient="records")
+
+    return {
+        "ok": True,
+        "sql": sql,
+        "row_count": int(len(df)),
+        "rows": rows,
+        "seconds": round(time.time() - started, 3),
+        **chart,
+    }
+
+
+@api.get("/duckdb/preview")
+def duck_preview(table: str = DEFAULT_TABLE, limit: int = 10) -> Dict[str, Any]:
+    limit = max(1, min(limit, 50))
+    table_q = q_ident(table)
+    cx = con()
+    try:
+        cur = cx.execute(f"SELECT * FROM {table_q} LIMIT {limit}")
+        rows = rows_to_dicts(cur, cur.fetchall())
+    finally:
+        cx.close()
+    return {"ok": True, "table": table, "rows": rows, "row_count": len(rows)}
+
+
+@api.post("/rag/build")
+def rag_build(req: RagBuildRequest, job_id: Optional[str] = None) -> Dict[str, Any]:
+    if chromadb is None:
+        raise HTTPException(status_code=500, detail="ChromaDB no esta disponible.")
+    path = Path(req.file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"No existe el CSV: {req.file_path}")
+    client = chromadb.PersistentClient(path=CHROMA_PATH)
+    if req.reset_collection:
+        try:
+            client.delete_collection(req.collection)
+        except Exception:
+            pass
+    collection = client.get_or_create_collection(name=req.collection, metadata={"hnsw:space": "cosine"})
+
+    started = time.time()
+    last_progress_update = 0.0
+    chunk_counter = 0
+    rows_read = 0
+    docs_indexed = 0
+    batch_docs: List[str] = []
+    batch_ids: List[str] = []
+    batch_meta: List[Dict[str, Any]] = []
+
+    read_kwargs: Dict[str, Any] = csv_read_kwargs(str(path), req.delimiter, req.encoding, chunksize=req.chunk_size_rows)
+
+    def flush() -> None:
+        nonlocal docs_indexed, batch_docs, batch_ids, batch_meta
+        if not batch_docs:
+            return
+        embeddings = embed_many(batch_docs)
+        collection.upsert(ids=batch_ids, documents=batch_docs, metadatas=batch_meta, embeddings=embeddings)
+        docs_indexed += len(batch_docs)
+        batch_docs, batch_ids, batch_meta = [], [], []
+
+    for chunk in pd.read_csv(str(path), **read_kwargs):
+        chunk_counter += 1
+        cols = list(chunk.columns)
+        text_cols = req.text_columns or pick_text_columns(cols)
+        meta_cols = req.metadata_columns or [c for c in cols if normalize_column(c) in {"id", "codigo", "curso", "nombre_curso", "programa", "facultad", "escuela", "periodo", "ciclo", "estado"}]
+        for local_idx, row in chunk.iterrows():
+            if req.row_limit and rows_read >= req.row_limit:
+                break
+            rows_read += 1
+            parts = []
+            for c in text_cols:
+                if c in row:
+                    v = str(row.get(c, "")).strip()
+                    if v:
+                        parts.append(f"{c}: {v}")
+            text = "\n".join(parts).strip()
+            if not text:
+                continue
+            meta = {"source_file": str(path), "row_number": int(local_idx) + 2}
+            for c in meta_cols:
+                if c in row:
+                    meta[normalize_column(c)[:60]] = str(row.get(c, ""))[:500]
+            for part_idx, piece in enumerate(chunk_text(text, req.document_chars, req.overlap_chars)):
+                batch_ids.append(f"{path.name}:{rows_read}:{part_idx}")
+                batch_docs.append(piece)
+                m = dict(meta)
+                m["chunk"] = part_idx
+                batch_meta.append(m)
+                if len(batch_docs) >= req.embed_batch_size:
+                    flush()
+        now_ts = time.time()
+        if job_id and (now_ts - last_progress_update > 2.5 or chunk_counter % 10 == 0):
+            last_progress_update = now_ts
+            if req.row_limit:
+                p = 10 + int(min(82, (rows_read / max(req.row_limit, 1)) * 82))
+            else:
+                p = min(90, 10 + chunk_counter)
+            update_job(job_id, progress=p, log=f"RAG {req.collection}: {rows_read} filas leidas, {docs_indexed + len(batch_docs)} fragmentos preparados.")
+        if req.row_limit and rows_read >= req.row_limit:
+            break
+    flush()
+    try:
+        total_collection = collection.count()
+    except Exception:
+        total_collection = None
+    return {
+        "ok": True,
+        "message": "Indice vectorial construido/actualizado correctamente.",
+        "collection": req.collection,
+        "rows_read": rows_read,
+        "documents_indexed": docs_indexed,
+        "collection_count": total_collection,
+        "seconds": round(time.time() - started, 2),
+        "embed_model": EMBED_MODEL,
+    }
+
+
+@api.post("/rag/build-collections")
+def rag_build_collections(req: RagCollectionsRequest, job_id: Optional[str] = None) -> Dict[str, Any]:
+    if chromadb is None:
+        raise HTTPException(status_code=500, detail="ChromaDB no esta disponible.")
+    path = Path(req.file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"No existe el CSV: {req.file_path}")
+    encoding = req.encoding or detect_encoding(str(path))
+    delimiter = normalize_delimiter_value(req.delimiter) or detect_delimiter(str(path), encoding)
+    profile = profile_csv_file(str(path), delimiter, 2500, encoding)
+    cols = profile.get("columns", [])
+    all_configs = collection_column_configs(cols)
+    requested = req.collections or list(all_configs.keys())
+    configs = {safe_collection_name(k): v for k, v in all_configs.items() if k in requested or safe_collection_name(k) in requested}
+    if not configs:
+        configs = {safe_collection_name(k): v for k, v in all_configs.items()}
+    meta_cols = req.metadata_columns or profile.get("recommendations", {}).get("metadata_columns", [])
+    client = chromadb.PersistentClient(path=CHROMA_PATH)
+    collections = {}
+    prefix = safe_collection_name(req.collection_prefix)
+    for key in configs:
+        name = key if key.startswith(prefix + "_") else f"{prefix}_{key.replace('silabos_', '')}"
+        if req.reset_collections:
+            try:
+                client.delete_collection(name)
+            except Exception:
+                pass
+        collections[key] = {
+            "name": name,
+            "handle": client.get_or_create_collection(name=name, metadata={"hnsw:space": "cosine"}),
+            "text_columns": configs[key],
+            "docs": [],
+            "ids": [],
+            "metas": [],
+            "indexed": 0,
+        }
+    started = time.time()
+    rows_read = 0
+    chunk_counter = 0
+    last_progress_update = 0.0
+    read_kwargs: Dict[str, Any] = csv_read_kwargs(str(path), delimiter, encoding, chunksize=req.chunk_size_rows)
+
+    def flush_one(item: Dict[str, Any]) -> None:
+        if not item["docs"]:
+            return
+        embeddings = embed_many(item["docs"])
+        item["handle"].upsert(ids=item["ids"], documents=item["docs"], metadatas=item["metas"], embeddings=embeddings)
+        item["indexed"] += len(item["docs"])
+        item["docs"], item["ids"], item["metas"] = [], [], []
+
+    def flush_all() -> None:
+        for item in collections.values():
+            flush_one(item)
+
+    for chunk in pd.read_csv(str(path), **read_kwargs):
+        chunk_counter += 1
+        for local_idx, row in chunk.iterrows():
+            if req.row_limit and rows_read >= req.row_limit:
+                break
+            rows_read += 1
+            base_meta = {"source_file": str(path), "row_number": int(local_idx) + 2}
+            for c in meta_cols:
+                if c in row:
+                    base_meta[normalize_column(c)[:60]] = str(row.get(c, ""))[:500]
+            for key, item in collections.items():
+                parts = []
+                for c in item["text_columns"]:
+                    if c in row:
+                        v = str(row.get(c, "")).strip()
+                        if v:
+                            parts.append(f"{c}: {v}")
+                text = "\n".join(parts).strip()
+                if not text:
+                    continue
+                for part_idx, piece in enumerate(chunk_text(text, req.document_chars, req.overlap_chars)):
+                    item["ids"].append(f"{item['name']}:{path.name}:{rows_read}:{part_idx}")
+                    item["docs"].append(piece)
+                    m = dict(base_meta)
+                    m["collection_type"] = key
+                    m["chunk"] = part_idx
+                    item["metas"].append(m)
+                    if len(item["docs"]) >= req.embed_batch_size:
+                        flush_one(item)
+        now_ts = time.time()
+        if job_id and (now_ts - last_progress_update > 2.5 or chunk_counter % 10 == 0):
+            last_progress_update = now_ts
+            indexed_total = sum(int(i["indexed"]) + len(i["docs"]) for i in collections.values())
+            if req.row_limit:
+                p = 8 + int(min(84, (rows_read / max(req.row_limit, 1)) * 84))
+            else:
+                p = min(92, 8 + chunk_counter)
+            update_job(job_id, progress=p, log=f"RAG colecciones: {rows_read} filas leidas, {indexed_total} fragmentos preparados.")
+        if req.row_limit and rows_read >= req.row_limit:
+            break
+    flush_all()
+    output = []
+    for key, item in collections.items():
+        try:
+            count = item["handle"].count()
+        except Exception:
+            count = None
+        output.append({
+            "collection_type": key,
+            "collection": item["name"],
+            "text_columns": item["text_columns"],
+            "documents_indexed": int(item["indexed"]),
+            "collection_count": count,
+        })
+    return {
+        "ok": True,
+        "message": "Indice RAG por colecciones construido/actualizado correctamente.",
+        "rows_read": rows_read,
+        "collections": output,
+        "seconds": round(time.time() - started, 2),
+        "embed_model": EMBED_MODEL,
+        "delimiter": "\t" if delimiter == "	" else delimiter,
+        "encoding": encoding,
+    }
+
+
+@api.post("/rag/search")
+def rag_search(req: RagSearchRequest) -> Dict[str, Any]:
+    if not req.query.strip():
+        raise HTTPException(status_code=422, detail="La consulta RAG esta vacia.")
+    collection = chroma_collection(req.collection)
+    q_emb = embed_one(req.query)
+    res = collection.query(query_embeddings=[q_emb], n_results=req.n_results, include=["documents", "metadatas", "distances"])
+    docs = res.get("documents", [[]])[0]
+    metas = res.get("metadatas", [[]])[0]
+    distances = res.get("distances", [[]])[0]
+    items = []
+    for i, doc in enumerate(docs):
+        items.append({
+            "document": doc,
+            "metadata": metas[i] if i < len(metas) else {},
+            "distance": distances[i] if i < len(distances) else None,
+        })
+    return {"ok": True, "collection": req.collection, "query": req.query, "results": items, "count": len(items)}

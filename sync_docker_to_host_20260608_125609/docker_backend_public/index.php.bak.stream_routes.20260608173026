@@ -1,0 +1,116 @@
+<?php
+require __DIR__ . '/../src/Support.php';
+Support::bootstrap();
+
+spl_autoload_register(function ($class) {
+    $file = __DIR__ . '/../src/' . $class . '.php';
+    if (is_file($file)) {
+        require $file;
+    }
+});
+
+Database::pdo();
+
+$router = new Router();
+$auth = new AuthController();
+$dataset = new DatasetController();
+$syllabus = new SyllabusController();
+$assistant = new AssistantController();
+$reports = new ReportController();
+$dataEngine = new DataEngineController();
+$setup = new SetupController();
+$curriculum = new CurriculumController();
+$compat = new CompatibilityController();
+
+$router->add('GET', '/api/health', fn() => Support::json(['ok' => true, 'service' => 'upeu-silabo-ai', 'time' => Support::now()]));
+$router->add('GET', '/api/auth/demo-credentials', fn() => $auth->demoCredentials());
+$router->add('POST', '/api/auth/login', fn() => $auth->login());
+$router->add('GET', '/api/auth/me', fn() => $auth->me());
+$router->add('POST', '/api/auth/logout', fn() => $auth->logout());
+
+$router->add('GET', '/api/datasets/status', fn() => $dataset->status());
+$router->add('POST', '/api/datasets/upload', fn() => $dataset->upload());
+$router->add('POST', '/api/datasets/import', fn() => $dataset->import());
+$router->add('POST', '/api/datasets/sample-import', fn() => $dataset->sampleImport());
+
+$router->add('GET', '/api/syllabi/search', fn() => $syllabus->search());
+$router->add('GET', '/api/syllabi/{id}', fn($params) => $syllabus->show($params));
+
+$router->add('GET', '/api/ollama/health', fn() => $assistant->ollamaHealth());
+$router->add('GET', '/api/ollama/models', fn() => $compat->ollamaModels());
+$router->add('POST', '/api/assistant/chat', fn() => $assistant->chat());
+$router->add('POST', '/api/assistant/generate-syllabus', fn() => $assistant->generateSyllabus());
+$router->add('POST', '/api/assistant/python-report-script', fn() => $assistant->pythonReportScript());
+
+$router->add('GET', '/api/reports/summary', fn() => $reports->summary());
+
+$router->add('GET', '/api/curriculum/framework', fn() => $curriculum->framework());
+$router->add('GET', '/api/curriculum/projects', fn() => $curriculum->projects());
+$router->add('POST', '/api/curriculum/projects', fn() => $curriculum->createProject());
+$router->add('POST', '/api/curriculum/generate-plan', fn() => $curriculum->generatePlan());
+$router->add('GET', '/api/curriculum/projects/{id}/versions', fn($params) => $curriculum->versions($params));
+$router->add('POST', '/api/curriculum/projects/{id}/versions', fn($params) => $curriculum->saveVersion($params));
+$router->add('GET', '/api/curriculum/versions/{id}', fn($params) => $curriculum->showVersion($params));
+$router->add('POST', '/api/curriculum/versions/{id}/publish', fn($params) => $curriculum->publishVersion($params));
+$router->add('GET', '/api/curriculum/versions/{a}/compare/{b}', fn($params) => $curriculum->compareVersions($params));
+
+$router->add('GET', '/api/setup/status', fn() => $setup->status());
+$router->add('POST', '/api/setup/pull-model', fn() => $setup->pullModelJob());
+$router->add('POST', '/api/setup/duckdb-job', fn() => $setup->duckdbJob());
+$router->add('POST', '/api/setup/rag-job', fn() => $setup->ragJob());
+$router->add('POST', '/api/setup/rag-collections-job', fn() => $setup->ragCollectionsJob());
+$router->add('GET', '/api/setup/csv-files', fn() => $setup->csvFiles());
+$router->add('POST', '/api/setup/profile-csv', fn() => $setup->profileCsv());
+$router->add('GET', '/api/setup/jobs', fn() => $setup->jobs());
+$router->add('GET', '/api/setup/jobs/{id}', fn($params) => $setup->job($params));
+$router->add('POST', '/api/setup/jobs/{id}/cancel', fn($params) => $setup->cancelJob($params));
+$router->add('POST', '/api/setup/jobs/cancel-all', fn() => $setup->cancelAllJobs());
+
+$router->add('GET', '/api/data-engine/health', fn() => $dataEngine->health());
+$router->add('GET', '/api/duckdb/tables', fn() => $dataEngine->tables());
+$router->add('GET', '/api/duckdb/schema', fn() => $dataEngine->schema());
+$router->add('GET', '/api/duckdb/preview', fn() => $dataEngine->preview());
+$router->add('POST', '/api/csv/profile', fn() => $dataEngine->profileCsv());
+$router->add('POST', '/api/duckdb/import', fn() => $dataEngine->importDuckdb());
+$router->add('POST', '/api/duckdb/query', fn() => $dataEngine->queryDuckdb());
+$router->add('POST', '/api/duckdb/natural-sql', fn() => $dataEngine->naturalSql());
+$router->add('POST', '/api/charts/sql', fn() => $dataEngine->chartSql());
+$router->add('POST', '/api/charts/natural', fn() => $dataEngine->naturalChart());
+$router->add('POST', '/api/user/ask', fn() => $dataEngine->userAsk());
+$router->add('POST', '/api/user/as-stream', fn() => $dataEngine->userAskStream());
+$router->add('POST', '/api/rag/build', fn() => $dataEngine->buildRag());
+$router->add('POST', '/api/rag/build-collections', fn() => $dataEngine->buildRagCollections());
+$router->add('POST', '/api/rag/search', fn() => $dataEngine->searchRag());
+$router->add('POST', '/api/rag/answer', fn() => $dataEngine->ragAnswer());
+
+
+// ── Compatibility routes for older frontend builds ───────────────────────────
+$router->add('GET', '/api/syllabi/stats', fn() => $compat->syllabiStats());
+$router->add('GET', '/api/engine/ping', fn() => $compat->enginePing());
+$router->add('GET', '/api/engine/duck-tables', fn() => $compat->engineTables());
+$router->add('GET', '/api/engine/setup-status', fn() => $compat->setupStatus());
+$router->add('GET', '/api/engine/list-csv', fn() => $compat->listCsv());
+$router->add('POST', '/api/engine/profile-csv', fn() => $compat->profileCsv());
+$router->add('POST', '/api/engine/upload-csv', fn() => $compat->uploadCsv());
+$router->add('POST', '/api/engine/pull-model', fn() => $compat->pullModel());
+$router->add('POST', '/api/engine/pull-base-models', fn() => $compat->pullBaseModels());
+$router->add('POST', '/api/engine/duck-import', fn() => $compat->duckImport());
+$router->add('POST', '/api/engine/duck-query', fn() => $compat->duckQuery());
+$router->add('POST', '/api/engine/natural-sql', fn() => $compat->naturalSql());
+$router->add('POST', '/api/engine/rag-build', fn() => $compat->ragBuild());
+$router->add('POST', '/api/engine/rag-build-collections', fn() => $compat->ragBuildCollections());
+$router->add('POST', '/api/engine/rag-search', fn() => $compat->ragSearch());
+$router->add('POST', '/api/engine/rag-answer', fn() => $compat->ragAnswer());
+$router->add('POST', '/api/engine/upload-pdf', fn() => $compat->notImplemented('carga de PDF'));
+$router->add('POST', '/api/engine/upload-excel', fn() => $compat->notImplemented('carga de Excel'));
+$router->add('GET', '/api/import/sample', fn() => $dataset->sampleImport());
+$router->add('POST', '/api/import/upload', fn() => $compat->uploadCsv());
+$router->add('POST', '/api/import/csv', fn() => $dataset->import());
+
+// ── Motor JoMelAi ────────────────────────────────────────────────────────────
+$jomelai = new JoMelAiController();
+$router->add('POST', '/api/ask',             fn() => $jomelai->ask());
+$router->add('GET',  '/api/jomelai/audit',   fn() => $jomelai->auditLog());
+$router->add('GET',  '/api/jomelai/stats',   fn() => $jomelai->auditStats());
+
+$router->dispatch();

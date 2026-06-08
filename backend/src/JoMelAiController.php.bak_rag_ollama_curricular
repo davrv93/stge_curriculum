@@ -1,0 +1,372 @@
+<?php
+/**
+ * JoMelAiController
+ * Entry point for the Motor JoMelAi unified endpoint.
+ * POST /api/ask  — main query endpoint (auth required)
+ * GET  /api/jomelai/audit  — audit log (admin only)
+ * GET  /api/jomelai/stats  — audit stats (admin only)
+ */
+final class JoMelAiController
+{
+    public function ask(): void
+    {
+        $user = Support::requireAuth();
+        $data = Support::readJson();
+
+        $question = trim((string)($data['question'] ?? ''));
+        
+
+        // Guard directo: asesoría curricular abierta.
+        // Debe ejecutarse antes de RAG, DuckDB, FastIntent o cualquier orquestador.
+        $qCurricular = Support::normalize($question);
+
+        $curricularActionTokens = [
+            'sugiere', 'sugerir', 'recomienda', 'recomendar',
+            'crea', 'crear', 'diseña', 'disena', 'diseñar', 'disenar',
+            'elabora', 'elaborar', 'propone', 'proponer',
+            'plantea', 'plantear', 'formula', 'formular',
+            'redacta', 'redactar', 'explica', 'explicar',
+            'actividades', 'estrategias', 'rubrica', 'rúbrica',
+            'verbos', 'alinear', 'alineacion', 'alineación'
+        ];
+
+        $curricularDomainTokens = [
+            'curso', 'cursos', 'asignatura', 'asignaturas',
+            'investigacion', 'investigación',
+            'aprendizaje', 'enseñanza', 'ensenanza',
+            'resultado', 'resultados',
+            'competencia', 'competencias',
+            'evaluacion', 'evaluación',
+            'perfil', 'egreso',
+            'malla', 'silabo', 'sílabo',
+            'semipresencial', 'didactica', 'didáctica'
+        ];
+
+        $curricularDataTokens = [
+            'cuantos', 'cuántos', 'cuantas', 'cuántas',
+            'cantidad', 'conteo', 'total',
+            'listar', 'lista', 'listame', 'muestrame', 'muéstrame',
+            'grafico', 'gráfico', 'grafica', 'gráfica',
+            'barras', 'pie', 'pastel', 'ranking', 'top',
+            'por sede', 'por facultad', 'por programa'
+        ];
+
+        $hasCurricularAction = false;
+        foreach ($curricularActionTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $hasCurricularAction = true;
+                break;
+            }
+        }
+
+        $hasCurricularDomain = false;
+        foreach ($curricularDomainTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $hasCurricularDomain = true;
+                break;
+            }
+        }
+
+        $isCurricularDataRequest = false;
+        foreach ($curricularDataTokens as $token) {
+            if (str_contains($qCurricular, Support::normalize($token))) {
+                $isCurricularDataRequest = true;
+                break;
+            }
+        }
+
+        $isOpenCurricularHow = (
+            (str_contains($qCurricular, 'como ') || str_contains($qCurricular, 'cómo '))
+            && $hasCurricularDomain
+            && !$isCurricularDataRequest
+        );
+
+        if ((($hasCurricularAction && $hasCurricularDomain) || $isOpenCurricularHow) && !$isCurricularDataRequest) {
+            $answer = $this->buildDynamicCurricularAdviceInline($question);
+
+            Support::json([
+                'ok' => true,
+                'intent' => 'curricular_advice',
+                'visible_intent' => 'Asesoría curricular',
+                'mode' => 'curricular_advice_direct_inline',
+                'message' => '',
+                'summary' => 'Respondí con orientación curricular porque la pregunta solicita diseño, propuesta o asesoría, no consulta de datos.',
+                'answer' => $answer,
+                'chart_url' => null,
+                'data_url' => null,
+                'chart' => null,
+                'table' => null,
+                'sql' => null,
+                'evidence' => [],
+                'actions' => [
+                    ['label' => 'Convertir en plantilla', 'type' => 'template'],
+                    ['label' => 'Pedir ejemplo aplicado', 'type' => 'example'],
+                ],
+                'suggestions' => [
+                    'Pedir una versión en formato sílabo',
+                    'Solicitar una rúbrica evaluativa',
+                    'Contextualizar por carrera o ciclo'
+                ],
+            ]);
+            return;
+        }
+
+$context  = trim((string)($data['context']  ?? 'user'));
+        $opts     = (array)($data['options'] ?? []);
+        $includeDebug = (bool)($opts['include_debug'] ?? false);
+        $isAdmin  = ($user['role'] ?? '') === 'admin';
+
+        if ($question === '') {
+            Support::json(['ok' => false, 'message' => 'La pregunta no puede estar vacía.'], 400);
+            return;
+        }
+        if (mb_strlen($question, 'UTF-8') > 2000) {
+            Support::json(['ok' => false, 'message' => 'La pregunta no debe superar los 2000 caracteres.'], 400);
+            return;
+        }
+
+        $startMs = (int)(microtime(true) * 1000);
+
+        try {
+            $classifier   = new JoMelAiIntentClassifier();
+            $intentResult = $classifier->classify($question);
+
+            $orchestrator = new JoMelAiOrchestrator();
+            $engineResult = $orchestrator->execute($intentResult, $question, $opts);
+
+            $formatter    = new JoMelAiResponseFormatter();
+            $response     = $formatter->format($intentResult, $engineResult, $includeDebug, $isAdmin);
+
+        } catch (Throwable $e) {
+            $durationMs = (int)(microtime(true) * 1000) - $startMs;
+            Support::json([
+                'ok'             => false,
+                'intent'         => 'unknown',
+                'visible_intent' => 'Error',
+                'message'        => 'Ocurrió un error al procesar tu solicitud. Inténtalo nuevamente.',
+                'summary'        => '',
+                'answer'         => '',
+                'chart_url'      => null,
+                'data_url'       => null,
+                'table'          => null,
+                'evidence'       => [],
+                'actions'        => [],
+                'suggestions'    => [],
+                'debug'          => $isAdmin && $includeDebug
+                    ? ['error' => $e->getMessage(), 'duration_ms' => $durationMs]
+                    : null,
+            ], 500);
+            return;
+        }
+
+        $durationMs = (int)(microtime(true) * 1000) - $startMs;
+        $response['_duration_ms'] = $durationMs;        // may be used by debug block
+
+        // Persist audit record (non-blocking best-effort)
+        try {
+            $engineResult['_duration_ms'] = $durationMs;
+            (new JoMelAiAuditService())->log($user, $question, $intentResult, $engineResult, $durationMs);
+        } catch (Throwable) {
+            // Audit failure must not break the main response
+        }
+
+        unset($response['_duration_ms']);
+        Support::json($response);
+    }
+
+    public function auditLog(): void
+    {
+        Support::requireAdmin();
+        $limit  = min((int)($_GET['limit']  ?? 100), 500);
+        $offset = max((int)($_GET['offset'] ?? 0),   0);
+        $rows   = (new JoMelAiAuditService())->getLog($limit, $offset);
+        Support::json(['ok' => true, 'rows' => $rows, 'limit' => $limit, 'offset' => $offset]);
+    }
+
+    public function auditStats(): void
+    {
+        Support::requireAdmin();
+        $stats = (new JoMelAiAuditService())->getStats();
+        Support::json(['ok' => true, 'stats' => $stats]);
+    }
+
+    private function detectCurricularCourseTopicInline(string $question): array
+    {
+        $q = Support::normalize($question);
+
+        $topics = [
+            'matematica' => [
+                'label' => 'Matemática',
+                'tokens' => [
+                    'matematica', 'matemática', 'calculo', 'cálculo',
+                    'algebra', 'álgebra', 'geometria', 'geometría',
+                    'estadistica', 'estadística', 'aritmetica', 'aritmética'
+                ],
+            ],
+            'investigacion' => [
+                'label' => 'Investigación',
+                'tokens' => [
+                    'investigacion', 'investigación', 'tesis', 'proyecto de investigacion',
+                    'proyecto de investigación', 'metodologia', 'metodología',
+                    'articulo cientifico', 'artículo científico'
+                ],
+            ],
+            'comunicacion' => [
+                'label' => 'Comunicación',
+                'tokens' => [
+                    'comunicacion', 'comunicación', 'redaccion', 'redacción',
+                    'lectura', 'escritura', 'oratoria', 'exposicion', 'exposición'
+                ],
+            ],
+            'programacion' => [
+                'label' => 'Programación',
+                'tokens' => [
+                    'programacion', 'programación', 'algoritmos', 'software',
+                    'codigo', 'código', 'base de datos', 'sistemas'
+                ],
+            ],
+            'salud' => [
+                'label' => 'Salud',
+                'tokens' => [
+                    'salud', 'nutricion', 'nutrición', 'enfermeria', 'enfermería',
+                    'clinica', 'clínica', 'paciente', 'comunitaria'
+                ],
+            ],
+        ];
+
+        foreach ($topics as $key => $item) {
+            foreach ($item['tokens'] as $token) {
+                if (str_contains($q, Support::normalize($token))) {
+                    return [
+                        'key' => $key,
+                        'label' => $item['label'],
+                    ];
+                }
+            }
+        }
+
+        return [
+            'key' => 'general',
+            'label' => 'el curso',
+        ];
+    }
+
+    private function buildDynamicCurricularAdviceInline(string $question): string
+    {
+        $topic = $this->detectCurricularCourseTopicInline($question);
+        $key = (string)($topic['key'] ?? 'general');
+        $label = (string)($topic['label'] ?? 'el curso');
+
+        if ($key === 'matematica') {
+            return "Para un curso de **{$label}**, conviene diseñar actividades que combinen comprensión conceptual, práctica guiada, resolución de problemas y aplicación contextual.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Diagnóstico de saberes previos**\n" .
+                "   - Evidencia: prueba breve o cuestionario sobre operaciones, conceptos base y procedimientos necesarios.\n\n" .
+                "2. **Resolución guiada de problemas modelo**\n" .
+                "   - Evidencia: desarrollo paso a paso con explicación del procedimiento y justificación de cada decisión.\n\n" .
+                "3. **Taller de errores frecuentes**\n" .
+                "   - Evidencia: corrección comentada de ejercicios con identificación del error conceptual o procedimental.\n\n" .
+                "4. **Problemas contextualizados**\n" .
+                "   - Evidencia: solución de casos aplicados a situaciones académicas, profesionales o de la vida cotidiana.\n\n" .
+                "5. **Trabajo colaborativo por estaciones**\n" .
+                "   - Evidencia: hoja de trabajo grupal con ejercicios de dificultad progresiva.\n\n" .
+                "6. **Mini exposición de estrategias de solución**\n" .
+                "   - Evidencia: explicación oral o escrita de diferentes métodos para resolver un mismo problema.\n\n" .
+                "7. **Evaluación formativa semanal**\n" .
+                "   - Evidencia: quiz corto con retroalimentación inmediata.\n\n" .
+                "8. **Proyecto de aplicación matemática**\n" .
+                "   - Evidencia: informe breve donde el estudiante modele, calcule, interprete y comunique resultados.\n\n" .
+                "## Secuencia recomendada\n\n" .
+                "Primero verifica prerrequisitos; luego trabaja procedimientos básicos; después incorpora problemas contextualizados; finalmente pide interpretación y comunicación del resultado.";
+        }
+
+        if ($key === 'investigacion') {
+            return "Para un curso de **{$label}**, puedes organizar actividades progresivas que lleven al estudiante desde la comprensión del problema hasta la elaboración de un producto académico.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Lectura guiada de artículos científicos**\n" .
+                "   - Evidencia: ficha de análisis con problema, objetivo, método, resultados y aporte.\n\n" .
+                "2. **Formulación del problema de investigación**\n" .
+                "   - Evidencia: matriz problema–pregunta–objetivo–justificación.\n\n" .
+                "3. **Búsqueda bibliográfica académica**\n" .
+                "   - Evidencia: matriz de antecedentes con autor, año, enfoque, método y hallazgos.\n\n" .
+                "4. **Construcción del marco teórico preliminar**\n" .
+                "   - Evidencia: mapa conceptual o síntesis argumentada con fuentes académicas.\n\n" .
+                "5. **Diseño metodológico**\n" .
+                "   - Evidencia: matriz con enfoque, diseño, población, muestra, técnicas e instrumentos.\n\n" .
+                "6. **Elaboración o adaptación de instrumentos**\n" .
+                "   - Evidencia: cuestionario, guía de entrevista, ficha de observación o rúbrica.\n\n" .
+                "7. **Revisión por pares del proyecto**\n" .
+                "   - Evidencia: lista de cotejo con observaciones y mejoras aplicadas.\n\n" .
+                "8. **Presentación del protocolo de investigación**\n" .
+                "   - Evidencia: documento final y sustentación breve.";
+        }
+
+        if ($key === 'comunicacion') {
+            return "Para un curso de **{$label}**, las actividades deben desarrollar comprensión lectora, producción escrita, argumentación y comunicación oral.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Lectura crítica de textos académicos**\n" .
+                "   - Evidencia: ficha con tesis, argumentos, evidencias y postura crítica.\n\n" .
+                "2. **Taller de escritura por etapas**\n" .
+                "   - Evidencia: borrador, revisión por pares y versión final.\n\n" .
+                "3. **Análisis de estructura textual**\n" .
+                "   - Evidencia: identificación de introducción, desarrollo, conclusión y conectores.\n\n" .
+                "4. **Debate académico breve**\n" .
+                "   - Evidencia: rúbrica de argumentación, claridad y respeto comunicativo.\n\n" .
+                "5. **Exposición oral con apoyo visual**\n" .
+                "   - Evidencia: presentación y autoevaluación.\n\n" .
+                "6. **Portafolio comunicativo**\n" .
+                "   - Evidencia: colección de textos revisados y reflexión de mejora.";
+        }
+
+        if ($key === 'programacion') {
+            return "Para un curso de **{$label}**, conviene trabajar con actividades prácticas, retos progresivos y productos funcionales.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Lectura y explicación de código**\n" .
+                "   - Evidencia: comentarios sobre flujo, variables, funciones y errores posibles.\n\n" .
+                "2. **Retos cortos de programación**\n" .
+                "   - Evidencia: solución funcional y explicación del algoritmo.\n\n" .
+                "3. **Depuración guiada**\n" .
+                "   - Evidencia: reporte de errores encontrados y correcciones aplicadas.\n\n" .
+                "4. **Mini proyecto por módulos**\n" .
+                "   - Evidencia: repositorio o entrega con funcionalidades incrementales.\n\n" .
+                "5. **Revisión por pares de código**\n" .
+                "   - Evidencia: checklist de legibilidad, funcionalidad y buenas prácticas.\n\n" .
+                "6. **Demostración final**\n" .
+                "   - Evidencia: producto ejecutable y sustentación técnica.";
+        }
+
+        if ($key === 'salud') {
+            return "Para un curso de **{$label}**, las actividades deben integrar fundamentos científicos, análisis de casos, práctica supervisada y criterio ético-profesional.\n\n" .
+                "## Actividades sugeridas\n\n" .
+                "1. **Análisis de caso clínico o comunitario**\n" .
+                "   - Evidencia: identificación del problema, factores asociados y propuesta de intervención.\n\n" .
+                "2. **Mapa conceptual de procesos o sistemas**\n" .
+                "   - Evidencia: representación organizada de conceptos clave y relaciones.\n\n" .
+                "3. **Simulación o práctica guiada**\n" .
+                "   - Evidencia: lista de cotejo de desempeño.\n\n" .
+                "4. **Revisión de evidencia científica**\n" .
+                "   - Evidencia: síntesis de fuente académica y aplicación al caso.\n\n" .
+                "5. **Diseño de intervención educativa o preventiva**\n" .
+                "   - Evidencia: plan breve con objetivo, población, actividad y evaluación.\n\n" .
+                "6. **Reflexión ética y de servicio**\n" .
+                "   - Evidencia: análisis breve sobre dignidad humana, responsabilidad profesional y servicio.";
+        }
+
+        return "Para **{$label}**, puedes diseñar actividades siguiendo una progresión didáctica clara: explorar, comprender, aplicar, producir y evaluar.\n\n" .
+            "## Actividades sugeridas\n\n" .
+            "1. **Diagnóstico inicial**\n" .
+            "   - Evidencia: cuestionario breve o actividad de saberes previos.\n\n" .
+            "2. **Lectura o recurso base guiado**\n" .
+            "   - Evidencia: ficha de ideas principales y preguntas de comprensión.\n\n" .
+            "3. **Análisis de caso o problema**\n" .
+            "   - Evidencia: solución argumentada o matriz de análisis.\n\n" .
+            "4. **Trabajo colaborativo aplicado**\n" .
+            "   - Evidencia: producto grupal con roles definidos.\n\n" .
+            "5. **Producto integrador**\n" .
+            "   - Evidencia: informe, presentación, proyecto, prototipo o propuesta.\n\n" .
+            "6. **Autoevaluación y coevaluación**\n" .
+            "   - Evidencia: rúbrica breve y reflexión de mejora.";
+    }
+
+
+}

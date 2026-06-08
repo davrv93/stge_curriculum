@@ -1,0 +1,185 @@
+/* ══════════════════════════════════════════════════════
+   MIGRATED TECHNICAL ROUTES JS — legacy /api/engine compatibility
+   Marker: JOMELAI_MIGRATED_LEGACY_TECH_ROUTES_V1
+══════════════════════════════════════════════════════ */
+(function(){
+  const $t = (id) => document.getElementById(id);
+  const val = (id, fallback='') => { const el = $t(id); return el ? String(el.value || '').trim() || fallback : fallback; };
+  const opt = (id) => { const v = val(id); return (!v || v.toLowerCase() === 'auto') ? null : (v === 'tab' ? '\t' : v); };
+  const num = (id, fallback=0) => { const n = Number(val(id)); return Number.isFinite(n) ? n : fallback; };
+  const checked = (id) => !!($t(id) && $t(id).checked);
+  const show = (id, data) => { const el = $t(id); if (!el) return; el.innerHTML = ''; el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2); };
+  const htmlOut = (id, html) => { const el = $t(id); if (el) el.innerHTML = html || ''; };
+  const setBtn = (btn, busy, text) => { if (!btn) return; if (!btn.dataset.label) btn.dataset.label = btn.textContent; btn.disabled = !!busy; btn.textContent = busy ? text : btn.dataset.label; };
+  const esc2 = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  const renderRows = (rows) => {
+    if (!Array.isArray(rows) || !rows.length) return '<p class="tech-mini">Sin filas para mostrar.</p>';
+    const cols = Object.keys(rows[0] || {});
+    return '<table><thead><tr>' + cols.map(c=>`<th>${esc2(c)}</th>`).join('') + '</tr></thead><tbody>' +
+      rows.slice(0,200).map(r=>'<tr>'+cols.map(c=>`<td>${esc2(r[c])}</td>`).join('')+'</tr>').join('') + '</tbody></table>';
+  };
+  const renderChartCompat = (obj) => {
+    const c = obj && (obj.chart || obj);
+    const b64 = c?.image_base64 || c?.chart?.image_base64 || obj?.image_base64;
+    if (b64) return `<img src="${String(b64).startsWith('data:') ? b64 : 'data:image/png;base64,' + b64}" alt="Gráfico">`;
+    if (c?.svg) return c.svg;
+    return `<pre>${esc2(JSON.stringify(obj, null, 2))}</pre>`;
+  };
+  async function rawFetch(endpoint, options={}) {
+    const headers = options.body instanceof FormData ? {} : {'Content-Type':'application/json'};
+    const res = await fetch((window.API_BASE || '') + endpoint, { credentials:'include', headers, ...options });
+    const text = await res.text();
+    let json; try { json = text ? JSON.parse(text) : {}; } catch { json = { ok:false, message:text || `HTTP ${res.status}` }; }
+    if (!res.ok || json.ok === false) {
+      const msg = json.message || json.detail || text || `HTTP ${res.status}`;
+      const err = new Error(msg); err.response = json; err.status = res.status; throw err;
+    }
+    return json;
+  }
+  async function compat(endpoints, options={}, transforms=[]) {
+    const list = Array.isArray(endpoints) ? endpoints : [endpoints];
+    const errs = [];
+    for (let i=0;i<list.length;i++) {
+      const ep = list[i];
+      const op = transforms[i] ? transforms[i](options) : options;
+      try { return await rawFetch(ep, op); }
+      catch(e) { errs.push(`${ep}: ${e.message}`); }
+    }
+    throw new Error('Ninguna ruta respondió correctamente:\n' + errs.join('\n'));
+  }
+  function syncCommonPaths() {
+    const setupPath = val('setupPath','/data/syllabi/silabos.csv');
+    ['csvPath','duckPath','ragPath','pyCsvPath'].forEach(id => { const el=$t(id); if (el && !el.dataset.touched) el.value = setupPath; });
+    const setupTable = val('setupTable','silabos');
+    ['duckTable','natTable','chartTable'].forEach(id => { const el=$t(id); if (el && !el.dataset.touched) el.value = setupTable; });
+  }
+  document.addEventListener('input', e => { if (e.target && e.target.id) e.target.dataset.touched = '1'; });
+
+  window.techShowRoute = function(route){
+    document.querySelectorAll('.tech-route').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tech-route-tab').forEach(x=>x.classList.toggle('active', x.dataset.techRoute===route));
+    const el = $t('tech-route-' + route); if (el) el.classList.add('active');
+    try { location.hash = 'tecnico/' + route; } catch(e) {}
+    if (route === 'jobs') window.techLoadJobsCompat();
+    if (route === 'setup') window.techRefreshAll();
+  };
+
+  window.techRefreshAll = async function(){
+    syncCommonPaths();
+    const el = $t('tech-global-status'); if (el) el.innerHTML = '<div class="tech-kpi"><span>Estado</span><b>Consultando…</b></div>';
+    let st = {};
+    try { st = await compat(['/api/engine/setup-status','/api/setup/status?file_path=/data/syllabi/silabos.csv&collection=silabos','/api/setup/status']); }
+    catch(e){ st = { ok:false, message:e.message }; }
+    const engine = st.engine || st || {};
+    const duck = engine.duckdb || st.duckdb || {};
+    const chroma = engine.chroma || st.chroma || {};
+    const ollama = st.ollama || engine.ollama || {};
+    if (el) el.innerHTML = `
+      <div class="tech-kpi"><span>DuckDB</span><b>${duck.exists || duck.ok || (duck.tables||[]).length ? 'OK' : 'Pendiente'}</b><div class="tech-mini">${esc2((duck.tables||[]).join(', ') || duck.path || st.message || '')}</div></div>
+      <div class="tech-kpi"><span>RAG / Chroma</span><b>${chroma.available || chroma.ok || chroma.collection_count ? 'OK' : 'Pendiente'}</b><div class="tech-mini">${esc2(String(chroma.collection_count ?? chroma.count ?? 0))} fragmentos</div></div>
+      <div class="tech-kpi"><span>Ollama</span><b>${ollama.ok || ollama.available ? 'OK' : 'Revisar'}</b><div class="tech-mini">${esc2((ollama.models||[]).join(', ') || '')}</div></div>`;
+    window.techLoadJobsCompat();
+  };
+
+  window.setupUploadCsvCompat = async function(){
+    const file = $t('setupCsvFile')?.files?.[0]; if (!file) return toast('Selecciona un CSV primero','error');
+    const fd = new FormData(); fd.append('file', file); fd.append('kind','silabos');
+    try { const r = await compat(['/api/engine/upload-csv','/api/datasets/upload'], {method:'POST', body:fd}); show('setupProfileBox', r); toast('CSV subido','success'); window.setupListCsvFilesCompat(); }
+    catch(e){ show('setupProfileBox', e.message); toast('Error al subir CSV','error'); }
+  };
+  window.setupListCsvFilesCompat = async function(){
+    try { const r = await compat(['/api/engine/list-csv','/api/setup/csv-files']); show('setupProfileBox', r); const files = r.files || r.csv_files || []; if(files[0]?.path){ $t('setupPath').value = files[0].path; syncCommonPaths(); } }
+    catch(e){ show('setupProfileBox', e.message); }
+  };
+  window.setupProfileCsvCompat = async function(){
+    try { const body1 = JSON.stringify({ path:val('setupPath'), sample_rows:num('setupProfileRows',5000), delimiter:opt('setupProfileDelimiter'), encoding:opt('setupProfileEncoding') });
+      const body2 = JSON.stringify({ file_path:val('setupPath'), sample_rows:num('setupProfileRows',5000), delimiter:opt('setupProfileDelimiter'), encoding:opt('setupProfileEncoding') });
+      const r = await compat(['/api/engine/profile-csv','/api/setup/profile-csv'], {method:'POST', body:body1}, [null, o=>({...o, body:body2})]); show('setupProfileBox', r); }
+    catch(e){ show('setupProfileBox', e.message); }
+  };
+  window.setupDuckJobCompat = async function(){
+    syncCommonPaths();
+    try { const p = { path:val('setupPath'), file_path:val('setupPath'), table:val('setupTable','silabos'), sample_size:num('setupSample',20000), delimiter:opt('setupImportDelimiter'), encoding:opt('setupEncoding'), skip_rows:num('setupSkipRows',0), replace:true, normalize_columns:true, async:true };
+      const r = await compat(['/api/engine/duck-import','/api/setup/duckdb-job'], {method:'POST', body:JSON.stringify(p)}, [null, o=>({...o, body:JSON.stringify({ file_path:p.file_path, table:p.table, delimiter:p.delimiter, replace:true, normalize_columns:true })})]); show('setupActionOutput', r); toast('Importación DuckDB iniciada','success'); window.techLoadJobsCompat(); }
+    catch(e){ show('setupActionOutput', e.message); toast('DuckDB falló','error'); }
+  };
+  window.setupRagJobCompat = async function(full){
+    try { const p = { path:val('setupPath'), file_path:val('setupPath'), collection:val('setupCollection','silabos'), limit: full ? 0 : num('setupRagLimit',2000), row_limit: full ? 0 : num('setupRagLimit',2000), batch:num('setupRagBatch',16), embed_batch_size:num('setupRagBatch',16), chunk_size_rows:1000, async:true, reset_collection:false };
+      const r = await compat(['/api/engine/rag-build','/api/setup/rag-job'], {method:'POST', body:JSON.stringify(p)}, [null, o=>({...o, body:JSON.stringify({ file_path:p.file_path, collection:p.collection, row_limit:p.row_limit, embed_batch_size:p.embed_batch_size, chunk_size_rows:p.chunk_size_rows, reset_collection:false })})]); show('setupActionOutput', r); toast('RAG iniciado','success'); window.techLoadJobsCompat(); }
+    catch(e){ show('setupActionOutput', e.message); toast('RAG falló','error'); }
+  };
+  window.setupRagCollectionsJobCompat = async function(full){
+    try { const p = { path:val('setupPath'), file_path:val('setupPath'), collection_prefix:val('setupCollection','silabos'), limit: full ? 0 : num('setupRagLimit',2000), row_limit: full ? 0 : num('setupRagLimit',2000), batch:num('setupRagBatch',16), embed_batch_size:num('setupRagBatch',16), chunk_size_rows:1000, async:true, reset_collections:false };
+      const r = await compat(['/api/engine/rag-build-collections','/api/setup/rag-collections-job'], {method:'POST', body:JSON.stringify(p)}); show('setupActionOutput', r); toast('RAG por colecciones iniciado','success'); window.techLoadJobsCompat(); }
+    catch(e){ show('setupActionOutput', e.message); toast('RAG colecciones falló','error'); }
+  };
+  window.setupTestChartCompat = async function(){
+    htmlOut('setupChartOutput','Consultando…');
+    try { const r = await compat(['/api/charts/natural'], {method:'POST', body:JSON.stringify({ model:'qwen2.5-coder:3b', table:val('setupTable','silabos'), question:val('setupChartQuestion'), limit:300 })}); htmlOut('setupChartOutput', renderChartCompat(r)); }
+    catch(e){ htmlOut('setupChartOutput', `<pre>${esc2(e.message)}</pre>`); }
+  };
+
+  window.sampleImportCompat = async function(){ try{ const r=await compat('/api/import/sample'); show('uploadResult',r); }catch(e){ show('uploadResult',e.message); } };
+  window.uploadCsvCompat = async function(){ const file=$t('csvFile')?.files?.[0]; if(!file) return toast('Selecciona un CSV','error'); const fd=new FormData(); fd.append('file',file); try{ const r=await compat(['/api/import/upload','/api/engine/upload-csv','/api/datasets/upload'],{method:'POST',body:fd}); show('uploadResult',r); toast('CSV guardado','success'); }catch(e){ show('uploadResult',e.message); } };
+  window.importCsvCompat = async function(){ try{ const r=await compat('/api/import/csv',{method:'POST',body:JSON.stringify({path:val('csvPath'),delimiter:val('delimiter',','),chunk_size:num('chunkSize',1000),replace:checked('replaceData')})}); show('uploadResult',r); }catch(e){ show('uploadResult',e.message); } };
+  window.uploadPdfCompat = async function(){ const file=$t('pdfFile')?.files?.[0]; if(!file) return toast('Selecciona PDF','error'); const fd=new FormData(); fd.append('file',file); fd.append('category',val('pdfCategory','normativa')); fd.append('description',val('pdfDescripcion')); try{ const r=await compat('/api/engine/upload-pdf',{method:'POST',body:fd}); show('docImportResult',r); }catch(e){ show('docImportResult',e.message); } };
+  window.uploadExcelCompat = async function(){ const file=$t('xlsxFile')?.files?.[0]; if(!file) return toast('Selecciona Excel','error'); const fd=new FormData(); fd.append('file',file); fd.append('sheet',val('xlsxSheet','0')); fd.append('table',val('xlsxTable','silabos')); try{ const r=await compat('/api/engine/upload-excel',{method:'POST',body:fd}); show('docImportResult',r); }catch(e){ show('docImportResult',e.message); } };
+
+  window.duckImportCompat = async function(asyncJob){ try{ const p={path:val('duckPath'),file_path:val('duckPath'),table:val('duckTable','silabos'),delimiter:opt('duckDelimiter'),sample_size:num('duckSample',20000),replace:checked('duckReplace'),async:!!asyncJob,normalize_columns:true}; const r=await compat(['/api/engine/duck-import','/api/setup/duckdb-job'],{method:'POST',body:JSON.stringify(p)},[null,o=>({...o,body:JSON.stringify({file_path:p.file_path,table:p.table,delimiter:p.delimiter,replace:p.replace,normalize_columns:true})})]); show('duckOutput',r); }catch(e){ show('duckOutput',e.message); } };
+  window.duckSchemaCompat = async function(){ const t=encodeURIComponent(val('duckTable','silabos')); try{ const r=await compat([`/api/engine/duck-schema?table=${t}`,`/duckdb/schema?table=${t}`,`/api/duckdb/schema?table=${t}`]); show('duckOutput',r); }catch(e){ show('duckOutput',e.message); } };
+  window.duckPreviewCompat = async function(){ const t=encodeURIComponent(val('duckTable','silabos')); try{ const r=await compat([`/api/engine/duck-preview?table=${t}&limit=10`,`/duckdb/query`,`/api/duckdb/query`], {}, [null,()=>({method:'POST',body:JSON.stringify({sql:`SELECT * FROM ${val('duckTable','silabos')} LIMIT 10`,limit:10})}),()=>({method:'POST',body:JSON.stringify({sql:`SELECT * FROM ${val('duckTable','silabos')} LIMIT 10`,limit:10})})]); show('duckOutput',r); }catch(e){ show('duckOutput',e.message); } };
+  window.duckTablesCompat = async function(){ try{ const r=await compat(['/api/engine/duck-tables','/duckdb/schema','/api/duckdb/schema']); show('duckOutput',r); }catch(e){ show('duckOutput',e.message); } };
+  window.duckQueryCompat = async function(){ try{ const sql=val('sqlManual'); const r=await compat(['/api/engine/duck-query','/duckdb/query','/api/duckdb/query'],{method:'POST',body:JSON.stringify({sql,limit:num('sqlLimit',100)})}); htmlOut('sqlResults', renderRows(r.rows || r.data || r.result || [])); show('duckOutput',r); }catch(e){ htmlOut('sqlResults',`<pre>${esc2(e.message)}</pre>`); } };
+
+  window.naturalSqlCompat = async function(){ htmlOut('natOutput','Consultando…'); try{ const p={model:val('natModel','qwen2.5-coder:3b'),table:val('natTable','silabos'),question:val('natQuestion'),limit:num('natLimit',100)}; const r=await compat(['/api/engine/natural-sql','/api/duckdb/natural-sql'],{method:'POST',body:JSON.stringify(p)}); htmlOut('natOutput', `<h4>SQL generado</h4><pre>${esc2(r.sql || '')}</pre>` + renderRows(r.rows || [])); }catch(e){ htmlOut('natOutput',`<pre>${esc2(e.message)}</pre>`); } };
+
+  window.ragBuildCompat = async function(){ try{ const p={path:val('ragPath'),file_path:val('ragPath'),collection:val('ragCollection','silabos'),delimiter:opt('ragDelimiter'),chunk_size:num('ragChunk',1000),chunk_size_rows:num('ragChunk',1000),row_limit:num('ragRowLimit',200),embed_batch:num('ragEmbedBatch',16),embed_batch_size:num('ragEmbedBatch',16),text_columns:val('ragTextColumns'),metadata_columns:val('ragMetadataColumns'),reset:checked('ragReset'),reset_collection:checked('ragReset'),async:true}; const r=await compat(['/api/engine/rag-build','/api/setup/rag-job'],{method:'POST',body:JSON.stringify(p)}); show('ragOutput',r); window.techLoadJobsCompat(); }catch(e){ show('ragOutput',e.message); } };
+  window.ragSearchCompat = async function(){ htmlOut('ragResults','Buscando…'); try{ const p={query:val('ragSearchQ'),question:val('ragSearchQ'),collection:val('ragCollection','silabos'),n_results:6}; const r=await compat(['/api/engine/rag-search','/api/rag/search'],{method:'POST',body:JSON.stringify(p)}); const rows=(r.results||r.matches||[]); htmlOut('ragResults', rows.length ? rows.map((x,i)=>`<div class="tech-note" style="margin-bottom:8px"><b>Fragmento ${i+1}</b><br>${esc2((x.document||x.text||JSON.stringify(x)).slice(0,800))}</div>`).join('') : `<pre>${esc2(JSON.stringify(r,null,2))}</pre>`); }catch(e){ htmlOut('ragResults',`<pre>${esc2(e.message)}</pre>`); } };
+  window.ragAnswerCompat = async function(){ htmlOut('ragAnswerOutput','Consultando…'); try{ const p={model:val('ragAnswerModel','qwen2.5-coder:3b'),collection:val('ragAnswerCollection','silabos'),question:val('ragQuestion'),n_results:num('ragAnswerN',5)}; const r=await compat(['/api/engine/rag-answer','/api/rag/answer'],{method:'POST',body:JSON.stringify(p)}); htmlOut('ragAnswerOutput', `<pre>${esc2(r.answer || r.response || r.message || JSON.stringify(r,null,2))}</pre>`); }catch(e){ htmlOut('ragAnswerOutput',`<pre>${esc2(e.message)}</pre>`); } };
+
+  window.chartSqlCompat = async function(){ htmlOut('chartOutput','Generando…'); try{ const p={sql:val('chartSql'),chart_type:val('chartType','bar'),type:val('chartType','bar'),title:val('chartTitle'),x:val('chartX'),y:val('chartY')}; const r=await compat(['/api/charts/sql'],{method:'POST',body:JSON.stringify(p)}); htmlOut('chartOutput', renderChartCompat(r)); }catch(e){ htmlOut('chartOutput',`<pre>${esc2(e.message)}</pre>`); } };
+  window.naturalChartCompat = async function(){ htmlOut('naturalChartOutput','Generando…'); try{ const p={model:val('chartModel','qwen2.5-coder:3b'),table:val('chartTable','silabos'),question:val('chartQuestion'),limit:300}; const r=await compat(['/api/charts/natural'],{method:'POST',body:JSON.stringify(p)}); htmlOut('naturalChartOutput', renderChartCompat(r)); }catch(e){ htmlOut('naturalChartOutput',`<pre>${esc2(e.message)}</pre>`); } };
+
+  window.reportSummaryCompat = async function(){ try{ const r=await compat(['/api/reports/summary','/api/syllabi/stats']); htmlOut('reportOutput', `<pre>${esc2(JSON.stringify(r,null,2))}</pre>`); }catch(e){ htmlOut('reportOutput',`<pre>${esc2(e.message)}</pre>`); } };
+  window.pythonScriptCompat = async function(){ try{ const p={model:val('pyModel','qwen2.5-coder:3b'),csv_path:val('pyCsvPath'),goal:val('pyGoal')}; const r=await compat('/api/assistant/python-report-script',{method:'POST',body:JSON.stringify(p)}); htmlOut('pythonOutput', `<pre>${esc2(r.script || r.response || JSON.stringify(r,null,2))}</pre>`); }catch(e){ htmlOut('pythonOutput',`<pre>${esc2(e.message)}</pre>`); } };
+
+  window.techLoadJobsCompat = async function(){
+    const el=$t('tech-jobs');
+    try { const r=await compat(['/api/engine/setup-status','/api/setup/jobs?limit=20']); const jobs=r.jobs || []; if(!el) return; if(!jobs.length){ el.innerHTML='<p class="tech-mini">Sin jobs recientes.</p>'; return; } el.innerHTML=jobs.map(j=>`<div class="tech-note" style="margin-bottom:8px"><b>${esc2(j.name||j.label||j.kind||j.id||'Job')}</b> — ${esc2(j.status||'')} · ${esc2(j.progress ?? '')}%<br><span class="tech-mini">${esc2(j.updated||j.updated_at||j.created_at||'')} ${esc2(j.log||'')}</span></div>`).join(''); }
+    catch(e){ if(el) el.textContent=e.message; }
+  };
+  window.techCancelAllJobsCompat = async function(){ try{ const r=await compat(['/api/setup/jobs/cancel-all','/api/engine/jobs/cancel-all'],{method:'POST',body:JSON.stringify({})}); show('tech-jobs',r); toast('Jobs cancelados o marcados','success'); }catch(e){ show('tech-jobs',e.message); toast('No se pudo cancelar','error'); } };
+
+  const oldNavigate = window.navigate;
+  if (typeof oldNavigate === 'function') {
+    window.navigate = function(page){ oldNavigate(page); if(page === 'tecnico') { setTimeout(()=>{ const h=(location.hash||'').replace('#',''); const sub=h.startsWith('tecnico/') ? h.split('/')[1] : 'setup'; window.techShowRoute(sub || 'setup'); window.techRefreshAll(); }, 80); } };
+  }
+  window.addEventListener('hashchange', () => { const h=(location.hash||'').replace('#',''); if(h.startsWith('tecnico/')) { if(typeof oldNavigate==='function') oldNavigate('tecnico'); window.techShowRoute(h.split('/')[1] || 'setup'); } });
+  document.addEventListener('DOMContentLoaded', () => { const h=(location.hash||'').replace('#',''); if(h.startsWith('tecnico/')) setTimeout(()=>window.techShowRoute(h.split('/')[1]||'setup'),200); });
+})();
+
+
+/* JOMELAI_TECH_ROUTES_LAYERED_FINAL_BINDINGS */
+(function(){
+  const baseNavigate = window.navigate;
+  window.navigate = function(page){
+    if (typeof baseNavigate === 'function') baseNavigate(page);
+    else {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      const target = document.getElementById('page-' + page);
+      if (target) target.classList.add('active');
+    }
+    if (page === 'tecnico') {
+      setTimeout(function(){
+        const h = (location.hash || '').replace('#','');
+        const sub = h.startsWith('tecnico/') ? h.split('/')[1] : 'setup';
+        if (typeof window.techShowRoute === 'function') window.techShowRoute(sub || 'setup');
+        if (typeof window.techRefreshAll === 'function') window.techRefreshAll();
+      }, 80);
+    }
+  };
+  window.addEventListener('hashchange', function(){
+    const h = (location.hash || '').replace('#','');
+    if (h.startsWith('tecnico/')) window.navigate('tecnico');
+  });
+})();
