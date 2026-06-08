@@ -3038,18 +3038,38 @@ def _cl_sse(event: str, data: Dict[str, Any]) -> str:
 
 def _cl_fast_answer(rows: List[Dict[str, Any]], title: str = "Resultado") -> str:
     if not rows:
-        return "No encontré registros para esa consulta."
+        return "No encontré registros para esa consulta.\nFIN_RESPUESTA"
 
-    if len(rows) == 1:
-        row = rows[0]
-        if "total" in row:
-            return f"{title}: {row.get('total')}."
-        if "valor" in row:
-            return f"{title}: {row.get('valor')}."
-        pairs = [f"{k}: {v}" for k, v in row.items()]
-        return title + ": " + ", ".join(pairs[:8]) + "."
+    total = len(rows)
+    sample = rows[:20]
 
-    return f"{title}: encontré {len(rows)} registros. Revisa la tabla de resultados."
+    if not sample or not isinstance(sample[0], dict):
+        return f"{title}: encontré {total} registros.\nFIN_RESPUESTA"
+
+    headers = list(sample[0].keys())
+
+    def _fmt(v):
+        s = "" if v is None else str(v)
+        s = s.replace("\n", " ").replace("\r", " ").replace("|", "/").strip()
+        return s[:120]
+
+    lines = []
+    lines.append(f"{title}: encontré {total} registros.")
+    lines.append("")
+    lines.append("| " + " | ".join(headers) + " |")
+    lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
+
+    for row in sample:
+        lines.append("| " + " | ".join(_fmt(row.get(h)) for h in headers) + " |")
+
+    if total > len(sample):
+        lines.append("")
+        lines.append(f"Mostrando {len(sample)} de {total} registros.")
+
+    lines.append("")
+    lines.append("FIN_RESPUESTA")
+
+    return "\n".join(lines)
 
 
 def _cl_route(req: ChatLateralAskRequest) -> Dict[str, Any]:
@@ -3232,7 +3252,7 @@ def chat_lateral_ask(req: ChatLateralAskRequest) -> Dict[str, Any]:
         return {
             "ok": True,
             "mode": "duckdb_chart",
-            "answer": "Generé el gráfico solicitado desde DuckDB.",
+            "answer": "Generé el gráfico solicitado desde DuckDB.\nFIN_RESPUESTA",
             "route": route,
             **chart_result,
             "seconds": round(time.time() - started, 3),
@@ -3350,7 +3370,7 @@ def chat_lateral_ask_stream(req: ChatLateralAskRequest):
                     limit=min(req.limit, MAX_CHART_ROWS),
                 ))
 
-                answer = "Generé el gráfico solicitado desde DuckDB."
+                answer = "Generé el gráfico solicitado desde DuckDB.\nFIN_RESPUESTA"
                 yield _cl_sse("token", {"text": answer})
                 yield _cl_sse("final", {
                     "ok": True,

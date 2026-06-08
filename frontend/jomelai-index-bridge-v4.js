@@ -530,7 +530,7 @@
       'Debe incluir: título, propósito, resultado de aprendizaje, instrucciones para el docente, instrucciones para el estudiante, recursos necesarios, secuencia de trabajo, producto esperado, criterios de evaluación con escala vigesimal, recomendaciones de uso y referencias o recursos de apoyo. Cierra con FIN_DOCUMENTO.';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question,
         context: 'resource_v2',
         model: MODEL,
@@ -661,7 +661,7 @@
     let config = null;
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: text + '\n\nResponde de forma organizada y cierra con FIN_RESPUESTA.',
         context: 'chat',
         model: MODEL,
@@ -702,7 +702,7 @@
     const tail = base.slice(Math.max(0, base.length - 1800));
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question:
           'Continúa la respuesta anterior exactamente desde donde quedó. Devuelve solo contenido nuevo, sin repetir encabezados. Cierra con FIN_RESPUESTA.\n\n' +
           'PREGUNTA ORIGINAL:\n' + item.question + '\n\n' +

@@ -725,7 +725,7 @@
       'CONTINUACION JSON:';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: prompt,
         context: 'syllabus_continue',
         model: MODEL,

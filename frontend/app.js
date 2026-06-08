@@ -349,7 +349,7 @@ async function sendAiMessageWith(question) {
     '<div class="ai-thinking"><span></span><span></span><span></span></div>';
   body.appendChild(thinking);
   body.scrollTop = body.scrollHeight;
-  const r = await api("POST", "/api/ask", {
+  const r = await api("POST", '/api/chat-lateral/ask', {
     question,
     context: "user",
     options: { table: "silabos" },
@@ -2177,7 +2177,7 @@ window.generateResourceV2 = async function () {
 
   try {
     // Llama al endpoint /api/ask de JoMelAi
-    const r = await api("POST", "/api/ask", {
+    const r = await api("POST", '/api/chat-lateral/ask', {
       question: prompt,
       context: "user",
       mode: "rag",
@@ -3437,7 +3437,7 @@ document.addEventListener("DOMContentLoaded", () => {
       'No cortes ideas a mitad de desarrollo. Cierra con la línea FIN_RESPUESTA.';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: controlledQuestion,
         context: 'chat',
         model: JM_MODEL,
@@ -3514,7 +3514,7 @@ document.addEventListener("DOMContentLoaded", () => {
       'CONTINUACIÓN NUEVA:';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: prompt,
         context: 'chat_continue',
         model: JM_MODEL,
@@ -3744,7 +3744,7 @@ document.addEventListener("DOMContentLoaded", () => {
       'Cierra con la línea FIN_DOCUMENTO.';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question,
         context: 'resource',
         model: JM_MODEL,
@@ -3824,7 +3824,7 @@ document.addEventListener("DOMContentLoaded", () => {
       'CONTINUACIÓN NUEVA:';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: prompt,
         context: 'resource_continue',
         model: JM_MODEL,

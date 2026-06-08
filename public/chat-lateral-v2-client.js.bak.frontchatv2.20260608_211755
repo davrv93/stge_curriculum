@@ -1,0 +1,219 @@
+(function () {
+  const STREAM_URL = '/api/chat-lateral/ask-stream';
+  const ASK_URL = '/api/chat-lateral/ask';
+
+  function safeJsonParse(value) {
+    try {
+      return JSON.parse(value);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getBodyObject(init) {
+    if (!init || !init.body) return {};
+    if (typeof init.body === 'string') {
+      return safeJsonParse(init.body) || {};
+    }
+    return {};
+  }
+
+  function normalizePayload(original) {
+    original = original || {};
+
+    let question =
+      original.question ||
+      original.ask ||
+      original.userAsk ||
+      original.user_ask ||
+      original.message ||
+      original.prompt ||
+      original.text ||
+      '';
+
+    if (!question && Array.isArray(original.messages) && original.messages.length) {
+      const last = original.messages[original.messages.length - 1];
+      question = last && (last.content || last.text || last.message || '');
+    }
+
+    return {
+      question: String(question || '').trim(),
+      table: original.table || original.duckdb_table || 'silabos',
+      collection: original.collection || original.rag_collection || 'silabos',
+      n_results: Number(original.n_results || original.nResults || 2),
+      stream: true,
+      prefer_duckdb: true,
+      prefer_rag: true,
+      allow_ollama: original.allow_ollama !== false,
+      chart: true,
+      limit: Number(original.limit || 100)
+    };
+  }
+
+  function isOldChatUrl(url) {
+    try {
+      const u = new URL(url, window.location.origin);
+      const p = u.pathname;
+
+      return [
+        '/api/ask_stream',
+        '/ask_stream',
+        '/api/ask-stream',
+        '/ask-stream',
+        '/api/rag/answer',
+        '/rag/answer',
+        '/api/ask',
+        '/ask'
+      ].includes(p);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function shouldUseStream(url) {
+    try {
+      const u = new URL(url, window.location.origin);
+      const p = u.pathname;
+      return p.includes('stream') || p.includes('ask_stream') || p.includes('ask-stream');
+    } catch (e) {
+      return true;
+    }
+  }
+
+  async function askStream(question, handlers, options) {
+    handlers = handlers || {};
+    options = options || {};
+
+    const payload = normalizePayload({
+      question: question,
+      table: options.table,
+      collection: options.collection,
+      n_results: options.n_results,
+      limit: options.limit,
+      allow_ollama: options.allow_ollama
+    });
+
+    const res = await fetch(STREAM_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      throw new Error('HTTP ' + res.status + ' en ' + STREAM_URL);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let finalData = null;
+
+    while (true) {
+      const read = await reader.read();
+      if (read.done) break;
+
+      buffer += decoder.decode(read.value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() || '';
+
+      for (const chunk of chunks) {
+        const lines = chunk.split('\n');
+        let event = 'message';
+        let dataLine = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+        }
+
+        if (!dataLine) continue;
+
+        let data = {};
+        try {
+          data = JSON.parse(dataLine);
+        } catch (e) {
+          data = { raw: dataLine };
+        }
+
+        if (event === 'ready' && handlers.onReady) handlers.onReady(data);
+        if (event === 'config' && handlers.onConfig) handlers.onConfig(data);
+        if (event === 'token' && handlers.onToken) handlers.onToken(data.text || '', data);
+        if (event === 'final') {
+          finalData = data;
+          if (handlers.onFinal) handlers.onFinal(data);
+        }
+      }
+    }
+
+    return finalData || { ok: true };
+  }
+
+  async function ask(question, options) {
+    options = options || {};
+    const payload = normalizePayload({
+      question: question,
+      table: options.table,
+      collection: options.collection,
+      n_results: options.n_results,
+      limit: options.limit,
+      allow_ollama: options.allow_ollama
+    });
+
+    const res = await fetch(ASK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      throw new Error('HTTP ' + res.status + ' en ' + ASK_URL);
+    }
+
+    return await res.json();
+  }
+
+  // Monkey patch conservador:
+  // Si el frontend viejo llama a /api/ask_stream, /api/rag/answer o /api/ask,
+  // lo redirigimos al Chat Lateral V2 sin tocar el resto de la app.
+  const originalFetch = window.fetch.bind(window);
+
+  window.fetch = function patchedFetch(input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+
+    if (url && isOldChatUrl(url)) {
+      const oldPayload = getBodyObject(init);
+      const newPayload = normalizePayload(oldPayload);
+
+      if (newPayload.question) {
+        const targetUrl = shouldUseStream(url) ? STREAM_URL : ASK_URL;
+
+        return originalFetch(targetUrl, {
+          method: 'POST',
+          headers: Object.assign(
+            {},
+            (init && init.headers) || {},
+            { 'Content-Type': 'application/json' }
+          ),
+          body: JSON.stringify(newPayload)
+        });
+      }
+    }
+
+    return originalFetch(input, init);
+  };
+
+  window.JoMelAiChatLateralV2 = {
+    askStream,
+    ask,
+    streamUrl: STREAM_URL,
+    askUrl: ASK_URL
+  };
+
+  window.jomelaiChatLateralAskStream = askStream;
+  window.jomelaiChatLateralAsk = ask;
+
+  console.info('[JoMelAi] Chat Lateral V2 activo:', {
+    streamUrl: STREAM_URL,
+    askUrl: ASK_URL
+  });
+})();

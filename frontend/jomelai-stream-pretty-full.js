@@ -575,7 +575,7 @@
       'No cortes ideas a mitad de desarrollo. Cierra con la línea FIN_RESPUESTA.';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: controlled,
         context: 'chat',
         model: MODEL,
@@ -650,7 +650,7 @@
       'CONTINUACIÓN NUEVA:';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: prompt,
         context: 'chat_continue',
         model: MODEL,
@@ -866,7 +866,7 @@
       'Cierra con la línea FIN_DOCUMENTO.';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question,
         context: 'resource',
         model: MODEL,
@@ -945,7 +945,7 @@
       'CONTINUACIÓN NUEVA:';
 
     try {
-      await streamPost('/api/ask-stream', {
+      await streamPost('/api/chat-lateral/ask-stream', {
         question: prompt,
         context: 'resource_continue',
         model: MODEL,
