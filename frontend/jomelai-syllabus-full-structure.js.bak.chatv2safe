@@ -1,6 +1,6 @@
 /* JOMELAI_SYLLABUS_FULL_STRUCTURE_V1 */
 (function () {
-  const MODEL = 'qwen2.5:0.5b';
+  const MODEL = 'qwen2.5-coder:1.5b';
 
   function id(x) { return document.getElementById(x); }
 
@@ -341,7 +341,7 @@
         start_date: meta.start_date,
         sessions_per_week: meta.sessions_per_week,
         max_tokens: 2400,
-        num_ctx: 1024,
+        num_ctx: 2048,
         temperature: 0.22
       }, {
         config(data) {

@@ -1,6 +1,6 @@
 /* JOMELAI_SYLLABUS_PRETTY_V6_LAYOUT_FIX */
 (function () {
-  const MODEL = 'qwen2.5-coder:1.5b';
+  const MODEL = 'qwen2.5:0.5b';
 
   const STATE = window.JM_SYLLABUS_PRETTY_V6 = window.JM_SYLLABUS_PRETTY_V6 || {
     raw: '',
@@ -758,7 +758,7 @@
         start_date: meta.start_date,
         sessions_per_week: meta.sessions_per_week,
         max_tokens: 2400,
-        num_ctx: 2048,
+        num_ctx: 1024,
         temperature: 0.22
       }, {
         config(data) {
@@ -832,7 +832,7 @@
         context: 'syllabus_continue',
         model: MODEL,
         max_tokens: 1200,
-        num_ctx: 2048,
+        num_ctx: 1024,
         n_results: 0,
         temperature: 0.12,
         top_p: 0.85

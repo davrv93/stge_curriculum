@@ -5,7 +5,7 @@
    - Chat: sendAiMessage() -> streaming + continuar concatenando
 */
 (function () {
-  const MODEL = 'qwen2.5:0.5b';
+  const MODEL = 'qwen2.5-coder:1.5b';
 
   const ST = window.JM_BRIDGE_V4 = window.JM_BRIDGE_V4 || {
     chat: {},
@@ -401,7 +401,7 @@
         competency: meta.competency,
         sessions_per_week: meta.sessions_per_week,
         max_tokens: 2400,
-        num_ctx: 1024,
+        num_ctx: 2048,
         temperature: 0.22
       }, {
         config(data) {
@@ -535,7 +535,7 @@
         context: 'resource_v2',
         model: MODEL,
         max_tokens: 1300,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 1,
         temperature: 0.22,
         top_p: 0.85
@@ -666,7 +666,7 @@
         context: 'chat',
         model: MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 2,
         temperature: 0.22,
         top_p: 0.85
@@ -711,7 +711,7 @@
         context: 'chat_continue',
         model: MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 0,
         temperature: 0.14,
         top_p: 0.85

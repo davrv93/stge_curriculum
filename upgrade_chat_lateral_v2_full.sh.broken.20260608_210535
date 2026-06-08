@@ -1,0 +1,1750 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_DIR="${PROJECT_DIR:-$HOME/jomelai}"
+
+# Modelo SOLO para chat lateral.
+# No cambia embeddings, imports, DuckDB, jobs ni otros endpoints.
+OLLAMA_IMAGE_VERSION="${OLLAMA_IMAGE_VERSION:-0.5.7}"
+LATERAL_PRIMARY_MODEL="${LATERAL_PRIMARY_MODEL:-qwen2.5:0.5b}"
+LATERAL_FALLBACK_MODEL="${LATERAL_FALLBACK_MODEL:-tinyllama:latest}"
+
+LATERAL_NUM_CTX="${LATERAL_NUM_CTX:-1024}"
+LATERAL_NUM_PREDICT="${LATERAL_NUM_PREDICT:-220}"
+LATERAL_TIMEOUT="${LATERAL_TIMEOUT:-90}"
+LATERAL_N_RESULTS="${LATERAL_N_RESULTS:-2}"
+LATERAL_MAX_CONTEXT_CHARS="${LATERAL_MAX_CONTEXT_CHARS:-2600}"
+LATERAL_KEEP_ALIVE="${LATERAL_KEEP_ALIVE:-20m}"
+
+cd "$PROJECT_DIR"
+
+echo "=================================================="
+echo " JoMelAi Chat Lateral V2 - Front + Back + Engine"
+echo "=================================================="
+echo "Proyecto: $PROJECT_DIR"
+echo "Ollama image: ollama/ollama:$OLLAMA_IMAGE_VERSION"
+echo "Modelo lateral primario: $LATERAL_PRIMARY_MODEL"
+echo "Modelo lateral fallback: $LATERAL_FALLBACK_MODEL"
+
+if [ ! -f docker-compose.yml ] && [ ! -f compose.yml ]; then
+  echo "ERROR: no encuentro docker-compose.yml ni compose.yml en $PROJECT_DIR"
+  exit 1
+fi
+
+echo
+echo "== 1) Detectando servicios Docker =="
+OLLAMA_SERVICE="$(docker compose config --services | grep -i '^ollama$' || true)"
+if [ -z "$OLLAMA_SERVICE" ]; then
+  OLLAMA_SERVICE="$(docker compose config --services | grep -i 'ollama' | head -1 || true)"
+fi
+
+if [ -z "$OLLAMA_SERVICE" ]; then
+  echo "ERROR: no encontré servicio Ollama."
+  docker compose config --services
+  exit 1
+fi
+
+DATA_ENGINE_SERVICE="$(docker compose config --services | grep -Ei 'data-engine|data_engine|engine|silabo|api' | head -1 || true)"
+
+echo "Servicio Ollama: $OLLAMA_SERVICE"
+echo "Servicio Data Engine candidato: ${DATA_ENGINE_SERVICE:-NO_DETECTADO}"
+
+echo
+echo "== 2) Guardando variables .env para chat lateral =="
+touch .env
+
+set_env() {
+  local key="$1"
+  local value="$2"
+
+  if grep -q "^${key}=" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|g" .env
+  else
+    echo "${key}=${value}" >> .env
+  fi
+}
+
+set_env "OLLAMA_LATERAL_MODEL" "$LATERAL_PRIMARY_MODEL"
+set_env "OLLAMA_LATERAL_FALLBACK_MODEL" "$LATERAL_FALLBACK_MODEL"
+set_env "OLLAMA_LATERAL_NUM_CTX" "$LATERAL_NUM_CTX"
+set_env "OLLAMA_LATERAL_NUM_PREDICT" "$LATERAL_NUM_PREDICT"
+set_env "OLLAMA_LATERAL_TIMEOUT" "$LATERAL_TIMEOUT"
+set_env "OLLAMA_LATERAL_N_RESULTS" "$LATERAL_N_RESULTS"
+set_env "OLLAMA_LATERAL_MAX_CONTEXT_CHARS" "$LATERAL_MAX_CONTEXT_CHARS"
+set_env "OLLAMA_LATERAL_KEEP_ALIVE" "$LATERAL_KEEP_ALIVE"
+set_env "DATA_ENGINE_URL" "http://data-engine:8000"
+
+echo
+echo "== 3) Fijando versión de Ollama sin tocar data/ollama =="
+if [ -f docker-compose.override.yml ]; then
+  cp docker-compose.override.yml "docker-compose.override.yml.bak.chatv2.$(date +%Y%m%d_%H%M%S)"
+fi
+
+cat > docker-compose.override.yml <<YAML
+services:
+  $OLLAMA_SERVICE:
+    image: ollama/ollama:$OLLAMA_IMAGE_VERSION
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_KEEP_ALIVE: "$LATERAL_KEEP_ALIVE"
+YAML
+
+cat docker-compose.override.yml
+
+echo
+echo "== 4) Limpiando capas Docker incompletas, sin borrar volúmenes =="
+docker builder prune -af || true
+docker image prune -af || true
+docker container prune -f || true
+sudo apt clean || true
+
+echo
+echo "== 5) Levantando Ollama fijo =="
+docker compose pull "$OLLAMA_SERVICE"
+docker compose up -d --force-recreate "$OLLAMA_SERVICE"
+
+sleep 8
+
+OLLAMA_CONTAINER="$(docker compose ps -q "$OLLAMA_SERVICE")"
+if [ -z "$OLLAMA_CONTAINER" ]; then
+  echo "ERROR: no pude obtener contenedor Ollama."
+  docker compose ps
+  exit 1
+fi
+
+echo "Contenedor Ollama: $OLLAMA_CONTAINER"
+docker exec "$OLLAMA_CONTAINER" ollama --version || true
+
+test_model() {
+  local model="$1"
+
+  echo
+  echo "== Probando modelo lateral: $model =="
+  docker exec "$OLLAMA_CONTAINER" ollama pull "$model"
+
+  set +e
+  timeout 90 docker exec "$OLLAMA_CONTAINER" ollama run "$model" "Responde solo: OK"
+  local status=$?
+  set -e
+
+  if [ "$status" -eq 0 ]; then
+    echo "OK: $model funciona."
+    return 0
+  fi
+
+  echo "FALLÓ: $model"
+  docker logs --tail=120 "$OLLAMA_CONTAINER" || true
+  return 1
+}
+
+FINAL_LATERAL_MODEL=""
+
+if test_model "$LATERAL_PRIMARY_MODEL"; then
+  FINAL_LATERAL_MODEL="$LATERAL_PRIMARY_MODEL"
+else
+  echo
+  echo "El modelo primario falló. Probando fallback..."
+  if test_model "$LATERAL_FALLBACK_MODEL"; then
+    FINAL_LATERAL_MODEL="$LATERAL_FALLBACK_MODEL"
+  else
+    echo "ERROR: fallaron ambos modelos laterales."
+    docker logs --tail=200 "$OLLAMA_CONTAINER" || true
+    exit 1
+  fi
+fi
+
+set_env "OLLAMA_LATERAL_MODEL" "$FINAL_LATERAL_MODEL"
+
+echo
+echo "Modelo final para chat lateral: $FINAL_LATERAL_MODEL"
+
+echo
+echo "== 6) Detectando archivo Python Data Engine =="
+ENGINE_FILE="$(grep -Rsl '@api.post("/rag/answer")' . \
+  --exclude-dir=.git \
+  --exclude-dir=data \
+  --exclude-dir=node_modules \
+  --exclude-dir=vendor \
+  2>/dev/null | head -1 || true)"
+
+if [ -z "$ENGINE_FILE" ]; then
+  echo "ERROR: no encontré el archivo Python con @api.post(\"/rag/answer\")."
+  echo "Referencias encontradas:"
+  grep -R "rag_answer\|/rag/answer\|FastAPI" -n . \
+    --exclude-dir=.git \
+    --exclude-dir=data \
+    --exclude-dir=node_modules \
+    --exclude-dir=vendor \
+    2>/dev/null | head -100 || true
+  exit 1
+fi
+
+echo "Data Engine file: $ENGINE_FILE"
+cp "$ENGINE_FILE" "${ENGINE_FILE}.bak.chatv2.$(date +%Y%m%d_%H%M%S)"
+
+echo
+echo "== 7) Parcheando Data Engine con APIs nuevas =="
+python3 - "$ENGINE_FILE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+# Import StreamingResponse.
+if "from fastapi.responses import StreamingResponse" not in text:
+    text = text.replace(
+        "from fastapi import FastAPI, HTTPException",
+        "from fastapi import FastAPI, HTTPException\nfrom fastapi.responses import StreamingResponse"
+    )
+
+start = "# === CHAT LATERAL V2 PATCH START ===
+
+class ChatLateralAskRequest(BaseModel):
+    question: str
+    table: str = Field(default=DEFAULT_TABLE)
+    collection: str = Field(default="silabos")
+    model: Optional[str] = Field(default=None)
+    n_results: int = Field(default=2, ge=1, le=5)
+    stream: bool = Field(default=False)
+    prefer_duckdb: bool = Field(default=True)
+    prefer_rag: bool = Field(default=True)
+    allow_ollama: bool = Field(default=True)
+    chart: bool = Field(default=True)
+    limit: int = Field(default=100, ge=1, le=MAX_QUERY_LIMIT)
+
+
+def _lat_env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _lat_env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "true" if default else "false")).strip().lower()
+    return raw in {"1", "true", "yes", "si", "sí", "on"}
+
+
+OLLAMA_LATERAL_MODEL = os.getenv("OLLAMA_LATERAL_MODEL", "qwen2.5:0.5b").strip()
+OLLAMA_LATERAL_FALLBACK_MODEL = os.getenv("OLLAMA_LATERAL_FALLBACK_MODEL", "tinyllama:latest").strip()
+OLLAMA_LATERAL_NUM_CTX = _lat_env_int("OLLAMA_LATERAL_NUM_CTX", 1024)
+OLLAMA_LATERAL_NUM_PREDICT = _lat_env_int("OLLAMA_LATERAL_NUM_PREDICT", 220)
+OLLAMA_LATERAL_TIMEOUT = _lat_env_int("OLLAMA_LATERAL_TIMEOUT", 90)
+OLLAMA_LATERAL_N_RESULTS = _lat_env_int("OLLAMA_LATERAL_N_RESULTS", 2)
+OLLAMA_LATERAL_MAX_CONTEXT_CHARS = _lat_env_int("OLLAMA_LATERAL_MAX_CONTEXT_CHARS", 2600)
+OLLAMA_LATERAL_KEEP_ALIVE = os.getenv("OLLAMA_LATERAL_KEEP_ALIVE", "20m").strip()
+OLLAMA_LATERAL_FORCE_LIGHT = _lat_env_bool("OLLAMA_LATERAL_FORCE_LIGHT", True)
+
+
+def _lat_jsonable(value: Any) -> Any:
+    try:
+        json.dumps(value, ensure_ascii=False, default=str)
+        return value
+    except Exception:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _lat_sse(event: str, data: Dict[str, Any]) -> str:
+    return "event: " + event + "
+" + "data: " + json.dumps(_lat_jsonable(data), ensure_ascii=False) + "
+
+"
+
+
+def _lat_fast_answer_from_rows(rows: List[Dict[str, Any]], title: str = "Resultado") -> str:
+    if not rows:
+        return "No encontré registros para esa consulta."
+
+    if len(rows) == 1:
+        row = rows[0]
+        if "total" in row:
+            return f"{title}: {row.get('total')}."
+        if "valor" in row:
+            return f"{title}: {row.get('valor')}."
+        pairs = [f"{k}: {v}" for k, v in row.items()]
+        return title + ": " + ", ".join(pairs[:8]) + "."
+
+    return f"{title}: encontré {len(rows)} registros. Revisa la tabla de resultados."
+
+
+def _lat_compact_sources(results: List[Dict[str, Any]], max_chars: int) -> Tuple[str, List[Dict[str, Any]]]:
+    context_parts = []
+    evidence = []
+
+    for i, item in enumerate(results[: max(1, OLLAMA_LATERAL_N_RESULTS)]):
+        doc = str(item.get("document") or "").strip()
+        meta = item.get("metadata") or {}
+        if not doc:
+            continue
+
+        label = meta.get("curso") or meta.get("programa_estudio") or meta.get("source_file") or f"Fuente {i + 1}"
+        context_parts.append(f"[Fuente {i + 1}: {label}]
+{doc}")
+        evidence.append(item)
+
+    context = "
+
+".join(context_parts)
+    context = context[: max(800, int(max_chars or OLLAMA_LATERAL_MAX_CONTEXT_CHARS))]
+
+    return context, evidence
+
+
+def _lat_search_rag(question: str, collection: str, n_results: int) -> Dict[str, Any]:
+    try:
+        return rag_search(RagSearchRequest(
+            query=question,
+            collection=collection,
+            n_results=max(1, min(int(n_results or OLLAMA_LATERAL_N_RESULTS), 5))
+        ))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "collection": collection,
+            "query": question,
+            "results": [],
+            "count": 0,
+            "error": str(exc),
+        }
+
+
+def _lat_generate_once(question: str, context: str, model: Optional[str] = None) -> Dict[str, Any]:
+    selected_model = (
+        OLLAMA_LATERAL_MODEL
+        if OLLAMA_LATERAL_FORCE_LIGHT
+        else ((model or "").strip() or OLLAMA_LATERAL_MODEL)
+    )
+
+    prompt = f"""
+Eres JoMelAI Curriculista. Responde en español, breve, académico y directo.
+Usa primero el contexto recuperado. Si el contexto no alcanza, dilo explícitamente.
+No inventes cifras. Para conteos exactos, indica que se use DuckDB.
+
+Contexto:
+{context}
+
+Pregunta:
+{question}
+
+Respuesta breve:
+""".strip()
+
+    payload = {
+        "model": selected_model,
+        "prompt": prompt,
+        "stream": False,
+        "keep_alive": OLLAMA_LATERAL_KEEP_ALIVE,
+        "options": {
+            "temperature": 0.18,
+            "top_p": 0.80,
+            "num_ctx": OLLAMA_LATERAL_NUM_CTX,
+            "num_predict": OLLAMA_LATERAL_NUM_PREDICT,
+        },
+    }
+
+    started = time.time()
+
+    try:
+        r = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json=payload,
+            timeout=OLLAMA_LATERAL_TIMEOUT,
+        )
+        if r.status_code >= 400 and selected_model != OLLAMA_LATERAL_FALLBACK_MODEL:
+            payload["model"] = OLLAMA_LATERAL_FALLBACK_MODEL
+            selected_model = OLLAMA_LATERAL_FALLBACK_MODEL
+            r = requests.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json=payload,
+                timeout=OLLAMA_LATERAL_TIMEOUT,
+            )
+
+        r.raise_for_status()
+        answer = str(r.json().get("response") or "").strip()
+
+        return {
+            "ok": True,
+            "answer": answer,
+            "model_used": selected_model,
+            "seconds": round(time.time() - started, 3),
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "answer": (
+                "Encontré contexto relacionado, pero Ollama no respondió correctamente. "
+                "Revisa las fuentes recuperadas o intenta una pregunta más específica."
+            ),
+            "model_used": selected_model,
+            "error": str(exc),
+            "seconds": round(time.time() - started, 3),
+        }
+
+
+def _lat_route(req: ChatLateralAskRequest) -> Dict[str, Any]:
+    question = (req.question or "").strip()
+
+    if not question:
+        raise HTTPException(status_code=422, detail="La pregunta está vacía.")
+
+    started = time.time()
+
+    route = {
+        "ok": True,
+        "question": question,
+        "table": req.table,
+        "collection": req.collection,
+        "route": "rag_ollama",
+        "reason": "default_rag_first",
+        "intent": None,
+        "sql": None,
+        "chart_type": None,
+        "engine": "chat_lateral_v2_router",
+        "seconds": 0,
+    }
+
+    # 1) Primero resolver intención con el router existente.
+    try:
+        intent = intent_resolve(IntentResolveRequest(question=question, table=req.table))
+        route["intent"] = intent
+    except Exception as exc:
+        intent = None
+        route["intent_error"] = str(exc)
+
+    if isinstance(intent, dict):
+        sql = intent.get("sql")
+        mode = str(intent.get("mode") or "").lower()
+        chart_type = intent.get("chart_type")
+        report_intent = str(intent.get("report_intent") or "").lower()
+
+        if req.prefer_duckdb and sql and mode == "chart" and req.chart:
+            route.update({
+                "route": "duckdb_chart",
+                "reason": "intent_mode_chart",
+                "sql": sql,
+                "chart_type": chart_type or "bar",
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+        if req.prefer_duckdb and sql and mode == "sql":
+            route.update({
+                "route": "duckdb_sql",
+                "reason": "intent_mode_sql",
+                "sql": sql,
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+        if report_intent in {"list_courses", "list_programs", "count", "course_attributes"} and sql:
+            route.update({
+                "route": "duckdb_sql",
+                "reason": "academic_data_intent",
+                "sql": sql,
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+        if mode == "assistant":
+            route.update({
+                "route": "rag_ollama",
+                "reason": "assistant_curricular_advice",
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+    # 2) Si no hubo SQL, usar RAG antes de Ollama.
+    route["seconds"] = round(time.time() - started, 3)
+    return route
+
+
+@api.post("/chat-lateral/route")
+def chat_lateral_route(req: ChatLateralAskRequest) -> Dict[str, Any]:
+    return _lat_route(req)
+
+
+@api.post("/chat-lateral/ask")
+def chat_lateral_ask(req: ChatLateralAskRequest) -> Dict[str, Any]:
+    started = time.time()
+    route = _lat_route(req)
+
+    if route["route"] == "duckdb_sql":
+        sql_result = duck_query(DuckQueryRequest(sql=str(route["sql"]), limit=req.limit))
+        rows = sql_result.get("rows") or []
+
+        return {
+            "ok": True,
+            "mode": "duckdb_sql",
+            "answer": _lat_fast_answer_from_rows(rows, route.get("intent", {}).get("title") or "Resultado"),
+            "route": route,
+            "sql": sql_result.get("sql"),
+            "rows": rows,
+            "row_count": sql_result.get("row_count", len(rows)),
+            "seconds": round(time.time() - started, 3),
+            "ollama_used": False,
+            "chat_lateral_v2": True,
+        }
+
+    if route["route"] == "duckdb_chart":
+        intent = route.get("intent") or {}
+        chart_result = duck_chart(ChartRequest(
+            sql=str(route["sql"]),
+            chart_type=str(route.get("chart_type") or intent.get("chart_type") or "bar"),
+            title=str(intent.get("title") or "Reporte curricular"),
+            x=intent.get("x") or "categoria",
+            y=intent.get("y") or "total",
+            limit=min(req.limit, MAX_CHART_ROWS),
+        ))
+
+        return {
+            "ok": True,
+            "mode": "duckdb_chart",
+            "answer": "Generé el gráfico solicitado desde DuckDB.",
+            "route": route,
+            **chart_result,
+            "seconds": round(time.time() - started, 3),
+            "ollama_used": False,
+            "chat_lateral_v2": True,
+        }
+
+    rag = _lat_search_rag(req.question, req.collection, req.n_results)
+    results = rag.get("results") or []
+    context, evidence = _lat_compact_sources(results, OLLAMA_LATERAL_MAX_CONTEXT_CHARS)
+
+    if not req.allow_ollama:
+        return {
+            "ok": True,
+            "mode": "rag_only",
+            "answer": "Encontré fuentes relacionadas. Ollama está desactivado para esta solicitud.",
+            "route": route,
+            "sources": evidence,
+            "evidence": evidence,
+            "count": len(evidence),
+            "seconds": round(time.time() - started, 3),
+            "ollama_used": False,
+            "chat_lateral_v2": True,
+        }
+
+    if not context.strip():
+        context = "No se recuperó contexto suficiente desde RAG."
+
+    generated = _lat_generate_once(req.question, context, req.model)
+
+    return {
+        "ok": True,
+        "mode": "rag_ollama_light",
+        "answer": generated.get("answer", ""),
+        "route": route,
+        "sources": evidence,
+        "evidence": evidence,
+        "count": len(evidence),
+        "ollama_used": True,
+        "model_used": generated.get("model_used"),
+        "ollama_ok": generated.get("ok"),
+        "ollama_error": generated.get("error"),
+        "seconds": round(time.time() - started, 3),
+        "ollama_seconds": generated.get("seconds"),
+        "chat_lateral_v2": True,
+    }
+
+
+@api.post("/chat-lateral/ask-stream")
+def chat_lateral_ask_stream(req: ChatLateralAskRequest):
+    def generate():
+        started = time.time()
+
+        yield _lat_sse("ready", {"ok": True, "chat_lateral_v2": True})
+
+        try:
+            route = _lat_route(req)
+
+            yield _lat_sse("config", {
+                "ok": True,
+                "route": route.get("route"),
+                "reason": route.get("reason"),
+                "model": OLLAMA_LATERAL_MODEL,
+                "num_ctx": OLLAMA_LATERAL_NUM_CTX,
+                "num_predict": OLLAMA_LATERAL_NUM_PREDICT,
+                "n_results": min(req.n_results, OLLAMA_LATERAL_N_RESULTS),
+                "chat_lateral_v2": True,
+            })
+
+            if route["route"] == "duckdb_sql":
+                sql_result = duck_query(DuckQueryRequest(sql=str(route["sql"]), limit=req.limit))
+                rows = sql_result.get("rows") or []
+                answer = _lat_fast_answer_from_rows(rows, route.get("intent", {}).get("title") or "Resultado")
+
+                yield _lat_sse("token", {"text": answer})
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "duckdb_sql",
+                    "answer": answer,
+                    "route": route,
+                    "sql": sql_result.get("sql"),
+                    "rows": rows,
+                    "row_count": sql_result.get("row_count", len(rows)),
+                    "seconds": round(time.time() - started, 3),
+                    "ollama_used": False,
+                    "chat_lateral_v2": True,
+                })
+                return
+
+            if route["route"] == "duckdb_chart":
+                intent = route.get("intent") or {}
+                chart_result = duck_chart(ChartRequest(
+                    sql=str(route["sql"]),
+                    chart_type=str(route.get("chart_type") or intent.get("chart_type") or "bar"),
+                    title=str(intent.get("title") or "Reporte curricular"),
+                    x=intent.get("x") or "categoria",
+                    y=intent.get("y") or "total",
+                    limit=min(req.limit, MAX_CHART_ROWS),
+                ))
+
+                yield _lat_sse("token", {"text": "Generé el gráfico solicitado desde DuckDB."})
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "duckdb_chart",
+                    "answer": "Generé el gráfico solicitado desde DuckDB.",
+                    "route": route,
+                    **chart_result,
+                    "seconds": round(time.time() - started, 3),
+                    "ollama_used": False,
+                    "chat_lateral_v2": True,
+                })
+                return
+
+            rag = _lat_search_rag(req.question, req.collection, req.n_results)
+            results = rag.get("results") or []
+            context, evidence = _lat_compact_sources(results, OLLAMA_LATERAL_MAX_CONTEXT_CHARS)
+
+            if not req.allow_ollama:
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "rag_only",
+                    "answer": "Encontré fuentes relacionadas. Ollama está desactivado para esta solicitud.",
+                    "route": route,
+                    "sources": evidence,
+                    "evidence": evidence,
+                    "count": len(evidence),
+                    "seconds": round(time.time() - started, 3),
+                    "ollama_used": False,
+                    "chat_lateral_v2": True,
+                })
+                return
+
+            if not context.strip():
+                context = "No se recuperó contexto suficiente desde RAG."
+
+            selected_model = (
+                OLLAMA_LATERAL_MODEL
+                if OLLAMA_LATERAL_FORCE_LIGHT
+                else ((req.model or "").strip() or OLLAMA_LATERAL_MODEL)
+            )
+
+            prompt = f"""
+Eres JoMelAI Curriculista. Responde en español, breve, académico y directo.
+Usa primero el contexto recuperado. Si el contexto no alcanza, dilo explícitamente.
+No inventes cifras. Para conteos exactos, indica que se use DuckDB.
+
+Contexto:
+{context}
+
+Pregunta:
+{req.question}
+
+Respuesta breve:
+""".strip()
+
+            payload = {
+                "model": selected_model,
+                "prompt": prompt,
+                "stream": True,
+                "keep_alive": OLLAMA_LATERAL_KEEP_ALIVE,
+                "options": {
+                    "temperature": 0.18,
+                    "top_p": 0.80,
+                    "num_ctx": OLLAMA_LATERAL_NUM_CTX,
+                    "num_predict": OLLAMA_LATERAL_NUM_PREDICT,
+                },
+            }
+
+            answer_parts = []
+
+            try:
+                r = requests.post(
+                    f"{OLLAMA_BASE_URL}/api/generate",
+                    json=payload,
+                    stream=True,
+                    timeout=OLLAMA_LATERAL_TIMEOUT,
+                )
+
+                if r.status_code >= 400 and selected_model != OLLAMA_LATERAL_FALLBACK_MODEL:
+                    selected_model = OLLAMA_LATERAL_FALLBACK_MODEL
+                    payload["model"] = selected_model
+                    r = requests.post(
+                        f"{OLLAMA_BASE_URL}/api/generate",
+                        json=payload,
+                        stream=True,
+                        timeout=OLLAMA_LATERAL_TIMEOUT,
+                    )
+
+                if r.status_code >= 400:
+                    raise RuntimeError(f"Ollama respondió HTTP {r.status_code}: {r.text[:300]}")
+
+                for raw in r.iter_lines():
+                    if not raw:
+                        continue
+                    try:
+                        data = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        continue
+
+                    token = str(data.get("response") or "")
+                    if token:
+                        answer_parts.append(token)
+                        yield _lat_sse("token", {"text": token})
+
+                    if data.get("done"):
+                        break
+
+                answer = "".join(answer_parts).strip()
+
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "rag_ollama_light_stream",
+                    "answer": answer,
+                    "route": route,
+                    "sources": evidence,
+                    "evidence": evidence,
+                    "count": len(evidence),
+                    "ollama_used": True,
+                    "model_used": selected_model,
+                    "seconds": round(time.time() - started, 3),
+                    "chat_lateral_v2": True,
+                })
+
+            except Exception as exc:
+                fallback_answer = (
+                    "Encontré contexto relacionado, pero Ollama no respondió correctamente. "
+                    "Revisa las fuentes recuperadas o intenta una pregunta más específica."
+                )
+                yield _lat_sse("token", {"text": fallback_answer})
+                yield _lat_sse("final", {
+                    "ok": False,
+                    "mode": "rag_ollama_light_stream",
+                    "answer": fallback_answer,
+                    "route": route,
+                    "sources": evidence,
+                    "evidence": evidence,
+                    "count": len(evidence),
+                    "ollama_used": True,
+                    "model_used": selected_model,
+                    "error": str(exc),
+                    "seconds": round(time.time() - started, 3),
+                    "chat_lateral_v2": True,
+                })
+
+        except Exception as exc:
+            yield _lat_sse("final", {
+                "ok": False,
+                "mode": "chat_lateral_error",
+                "answer": "",
+                "message": str(exc),
+                "seconds": round(time.time() - started, 3),
+                "chat_lateral_v2": True,
+            })
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# === CHAT LATERAL V2 PATCH END ==="
+
+patch = r'''
+# === CHAT LATERAL V2 PATCH START ===
+
+class ChatLateralAskRequest(BaseModel):
+    question: str
+    table: str = Field(default=DEFAULT_TABLE)
+    collection: str = Field(default="silabos")
+    model: Optional[str] = Field(default=None)
+    n_results: int = Field(default=2, ge=1, le=5)
+    stream: bool = Field(default=False)
+    prefer_duckdb: bool = Field(default=True)
+    prefer_rag: bool = Field(default=True)
+    allow_ollama: bool = Field(default=True)
+    chart: bool = Field(default=True)
+    limit: int = Field(default=100, ge=1, le=MAX_QUERY_LIMIT)
+
+
+def _lat_env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _lat_env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "true" if default else "false")).strip().lower()
+    return raw in {"1", "true", "yes", "si", "sí", "on"}
+
+
+OLLAMA_LATERAL_MODEL = os.getenv("OLLAMA_LATERAL_MODEL", "qwen2.5:0.5b").strip()
+OLLAMA_LATERAL_FALLBACK_MODEL = os.getenv("OLLAMA_LATERAL_FALLBACK_MODEL", "tinyllama:latest").strip()
+OLLAMA_LATERAL_NUM_CTX = _lat_env_int("OLLAMA_LATERAL_NUM_CTX", 1024)
+OLLAMA_LATERAL_NUM_PREDICT = _lat_env_int("OLLAMA_LATERAL_NUM_PREDICT", 220)
+OLLAMA_LATERAL_TIMEOUT = _lat_env_int("OLLAMA_LATERAL_TIMEOUT", 90)
+OLLAMA_LATERAL_N_RESULTS = _lat_env_int("OLLAMA_LATERAL_N_RESULTS", 2)
+OLLAMA_LATERAL_MAX_CONTEXT_CHARS = _lat_env_int("OLLAMA_LATERAL_MAX_CONTEXT_CHARS", 2600)
+OLLAMA_LATERAL_KEEP_ALIVE = os.getenv("OLLAMA_LATERAL_KEEP_ALIVE", "20m").strip()
+OLLAMA_LATERAL_FORCE_LIGHT = _lat_env_bool("OLLAMA_LATERAL_FORCE_LIGHT", True)
+
+
+def _lat_jsonable(value: Any) -> Any:
+    try:
+        json.dumps(value, ensure_ascii=False, default=str)
+        return value
+    except Exception:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _lat_sse(event: str, data: Dict[str, Any]) -> str:
+    return "event: " + event + "
+" + "data: " + json.dumps(_lat_jsonable(data), ensure_ascii=False) + "
+
+"
+
+
+def _lat_fast_answer_from_rows(rows: List[Dict[str, Any]], title: str = "Resultado") -> str:
+    if not rows:
+        return "No encontré registros para esa consulta."
+
+    if len(rows) == 1:
+        row = rows[0]
+        if "total" in row:
+            return f"{title}: {row.get('total')}."
+        if "valor" in row:
+            return f"{title}: {row.get('valor')}."
+        pairs = [f"{k}: {v}" for k, v in row.items()]
+        return title + ": " + ", ".join(pairs[:8]) + "."
+
+    return f"{title}: encontré {len(rows)} registros. Revisa la tabla de resultados."
+
+
+def _lat_compact_sources(results: List[Dict[str, Any]], max_chars: int) -> Tuple[str, List[Dict[str, Any]]]:
+    context_parts = []
+    evidence = []
+
+    for i, item in enumerate(results[: max(1, OLLAMA_LATERAL_N_RESULTS)]):
+        doc = str(item.get("document") or "").strip()
+        meta = item.get("metadata") or {}
+        if not doc:
+            continue
+
+        label = meta.get("curso") or meta.get("programa_estudio") or meta.get("source_file") or f"Fuente {i + 1}"
+        context_parts.append(f"[Fuente {i + 1}: {label}]
+{doc}")
+        evidence.append(item)
+
+    context = "
+
+".join(context_parts)
+    context = context[: max(800, int(max_chars or OLLAMA_LATERAL_MAX_CONTEXT_CHARS))]
+
+    return context, evidence
+
+
+def _lat_search_rag(question: str, collection: str, n_results: int) -> Dict[str, Any]:
+    try:
+        return rag_search(RagSearchRequest(
+            query=question,
+            collection=collection,
+            n_results=max(1, min(int(n_results or OLLAMA_LATERAL_N_RESULTS), 5))
+        ))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "collection": collection,
+            "query": question,
+            "results": [],
+            "count": 0,
+            "error": str(exc),
+        }
+
+
+def _lat_generate_once(question: str, context: str, model: Optional[str] = None) -> Dict[str, Any]:
+    selected_model = (
+        OLLAMA_LATERAL_MODEL
+        if OLLAMA_LATERAL_FORCE_LIGHT
+        else ((model or "").strip() or OLLAMA_LATERAL_MODEL)
+    )
+
+    prompt = f"""
+Eres JoMelAI Curriculista. Responde en español, breve, académico y directo.
+Usa primero el contexto recuperado. Si el contexto no alcanza, dilo explícitamente.
+No inventes cifras. Para conteos exactos, indica que se use DuckDB.
+
+Contexto:
+{context}
+
+Pregunta:
+{question}
+
+Respuesta breve:
+""".strip()
+
+    payload = {
+        "model": selected_model,
+        "prompt": prompt,
+        "stream": False,
+        "keep_alive": OLLAMA_LATERAL_KEEP_ALIVE,
+        "options": {
+            "temperature": 0.18,
+            "top_p": 0.80,
+            "num_ctx": OLLAMA_LATERAL_NUM_CTX,
+            "num_predict": OLLAMA_LATERAL_NUM_PREDICT,
+        },
+    }
+
+    started = time.time()
+
+    try:
+        r = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json=payload,
+            timeout=OLLAMA_LATERAL_TIMEOUT,
+        )
+        if r.status_code >= 400 and selected_model != OLLAMA_LATERAL_FALLBACK_MODEL:
+            payload["model"] = OLLAMA_LATERAL_FALLBACK_MODEL
+            selected_model = OLLAMA_LATERAL_FALLBACK_MODEL
+            r = requests.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json=payload,
+                timeout=OLLAMA_LATERAL_TIMEOUT,
+            )
+
+        r.raise_for_status()
+        answer = str(r.json().get("response") or "").strip()
+
+        return {
+            "ok": True,
+            "answer": answer,
+            "model_used": selected_model,
+            "seconds": round(time.time() - started, 3),
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "answer": (
+                "Encontré contexto relacionado, pero Ollama no respondió correctamente. "
+                "Revisa las fuentes recuperadas o intenta una pregunta más específica."
+            ),
+            "model_used": selected_model,
+            "error": str(exc),
+            "seconds": round(time.time() - started, 3),
+        }
+
+
+def _lat_route(req: ChatLateralAskRequest) -> Dict[str, Any]:
+    question = (req.question or "").strip()
+
+    if not question:
+        raise HTTPException(status_code=422, detail="La pregunta está vacía.")
+
+    started = time.time()
+
+    route = {
+        "ok": True,
+        "question": question,
+        "table": req.table,
+        "collection": req.collection,
+        "route": "rag_ollama",
+        "reason": "default_rag_first",
+        "intent": None,
+        "sql": None,
+        "chart_type": None,
+        "engine": "chat_lateral_v2_router",
+        "seconds": 0,
+    }
+
+    # 1) Primero resolver intención con el router existente.
+    try:
+        intent = intent_resolve(IntentResolveRequest(question=question, table=req.table))
+        route["intent"] = intent
+    except Exception as exc:
+        intent = None
+        route["intent_error"] = str(exc)
+
+    if isinstance(intent, dict):
+        sql = intent.get("sql")
+        mode = str(intent.get("mode") or "").lower()
+        chart_type = intent.get("chart_type")
+        report_intent = str(intent.get("report_intent") or "").lower()
+
+        if req.prefer_duckdb and sql and mode == "chart" and req.chart:
+            route.update({
+                "route": "duckdb_chart",
+                "reason": "intent_mode_chart",
+                "sql": sql,
+                "chart_type": chart_type or "bar",
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+        if req.prefer_duckdb and sql and mode == "sql":
+            route.update({
+                "route": "duckdb_sql",
+                "reason": "intent_mode_sql",
+                "sql": sql,
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+        if report_intent in {"list_courses", "list_programs", "count", "course_attributes"} and sql:
+            route.update({
+                "route": "duckdb_sql",
+                "reason": "academic_data_intent",
+                "sql": sql,
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+        if mode == "assistant":
+            route.update({
+                "route": "rag_ollama",
+                "reason": "assistant_curricular_advice",
+            })
+            route["seconds"] = round(time.time() - started, 3)
+            return route
+
+    # 2) Si no hubo SQL, usar RAG antes de Ollama.
+    route["seconds"] = round(time.time() - started, 3)
+    return route
+
+
+@api.post("/chat-lateral/route")
+def chat_lateral_route(req: ChatLateralAskRequest) -> Dict[str, Any]:
+    return _lat_route(req)
+
+
+@api.post("/chat-lateral/ask")
+def chat_lateral_ask(req: ChatLateralAskRequest) -> Dict[str, Any]:
+    started = time.time()
+    route = _lat_route(req)
+
+    if route["route"] == "duckdb_sql":
+        sql_result = duck_query(DuckQueryRequest(sql=str(route["sql"]), limit=req.limit))
+        rows = sql_result.get("rows") or []
+
+        return {
+            "ok": True,
+            "mode": "duckdb_sql",
+            "answer": _lat_fast_answer_from_rows(rows, route.get("intent", {}).get("title") or "Resultado"),
+            "route": route,
+            "sql": sql_result.get("sql"),
+            "rows": rows,
+            "row_count": sql_result.get("row_count", len(rows)),
+            "seconds": round(time.time() - started, 3),
+            "ollama_used": False,
+            "chat_lateral_v2": True,
+        }
+
+    if route["route"] == "duckdb_chart":
+        intent = route.get("intent") or {}
+        chart_result = duck_chart(ChartRequest(
+            sql=str(route["sql"]),
+            chart_type=str(route.get("chart_type") or intent.get("chart_type") or "bar"),
+            title=str(intent.get("title") or "Reporte curricular"),
+            x=intent.get("x") or "categoria",
+            y=intent.get("y") or "total",
+            limit=min(req.limit, MAX_CHART_ROWS),
+        ))
+
+        return {
+            "ok": True,
+            "mode": "duckdb_chart",
+            "answer": "Generé el gráfico solicitado desde DuckDB.",
+            "route": route,
+            **chart_result,
+            "seconds": round(time.time() - started, 3),
+            "ollama_used": False,
+            "chat_lateral_v2": True,
+        }
+
+    rag = _lat_search_rag(req.question, req.collection, req.n_results)
+    results = rag.get("results") or []
+    context, evidence = _lat_compact_sources(results, OLLAMA_LATERAL_MAX_CONTEXT_CHARS)
+
+    if not req.allow_ollama:
+        return {
+            "ok": True,
+            "mode": "rag_only",
+            "answer": "Encontré fuentes relacionadas. Ollama está desactivado para esta solicitud.",
+            "route": route,
+            "sources": evidence,
+            "evidence": evidence,
+            "count": len(evidence),
+            "seconds": round(time.time() - started, 3),
+            "ollama_used": False,
+            "chat_lateral_v2": True,
+        }
+
+    if not context.strip():
+        context = "No se recuperó contexto suficiente desde RAG."
+
+    generated = _lat_generate_once(req.question, context, req.model)
+
+    return {
+        "ok": True,
+        "mode": "rag_ollama_light",
+        "answer": generated.get("answer", ""),
+        "route": route,
+        "sources": evidence,
+        "evidence": evidence,
+        "count": len(evidence),
+        "ollama_used": True,
+        "model_used": generated.get("model_used"),
+        "ollama_ok": generated.get("ok"),
+        "ollama_error": generated.get("error"),
+        "seconds": round(time.time() - started, 3),
+        "ollama_seconds": generated.get("seconds"),
+        "chat_lateral_v2": True,
+    }
+
+
+@api.post("/chat-lateral/ask-stream")
+def chat_lateral_ask_stream(req: ChatLateralAskRequest):
+    def generate():
+        started = time.time()
+
+        yield _lat_sse("ready", {"ok": True, "chat_lateral_v2": True})
+
+        try:
+            route = _lat_route(req)
+
+            yield _lat_sse("config", {
+                "ok": True,
+                "route": route.get("route"),
+                "reason": route.get("reason"),
+                "model": OLLAMA_LATERAL_MODEL,
+                "num_ctx": OLLAMA_LATERAL_NUM_CTX,
+                "num_predict": OLLAMA_LATERAL_NUM_PREDICT,
+                "n_results": min(req.n_results, OLLAMA_LATERAL_N_RESULTS),
+                "chat_lateral_v2": True,
+            })
+
+            if route["route"] == "duckdb_sql":
+                sql_result = duck_query(DuckQueryRequest(sql=str(route["sql"]), limit=req.limit))
+                rows = sql_result.get("rows") or []
+                answer = _lat_fast_answer_from_rows(rows, route.get("intent", {}).get("title") or "Resultado")
+
+                yield _lat_sse("token", {"text": answer})
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "duckdb_sql",
+                    "answer": answer,
+                    "route": route,
+                    "sql": sql_result.get("sql"),
+                    "rows": rows,
+                    "row_count": sql_result.get("row_count", len(rows)),
+                    "seconds": round(time.time() - started, 3),
+                    "ollama_used": False,
+                    "chat_lateral_v2": True,
+                })
+                return
+
+            if route["route"] == "duckdb_chart":
+                intent = route.get("intent") or {}
+                chart_result = duck_chart(ChartRequest(
+                    sql=str(route["sql"]),
+                    chart_type=str(route.get("chart_type") or intent.get("chart_type") or "bar"),
+                    title=str(intent.get("title") or "Reporte curricular"),
+                    x=intent.get("x") or "categoria",
+                    y=intent.get("y") or "total",
+                    limit=min(req.limit, MAX_CHART_ROWS),
+                ))
+
+                yield _lat_sse("token", {"text": "Generé el gráfico solicitado desde DuckDB."})
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "duckdb_chart",
+                    "answer": "Generé el gráfico solicitado desde DuckDB.",
+                    "route": route,
+                    **chart_result,
+                    "seconds": round(time.time() - started, 3),
+                    "ollama_used": False,
+                    "chat_lateral_v2": True,
+                })
+                return
+
+            rag = _lat_search_rag(req.question, req.collection, req.n_results)
+            results = rag.get("results") or []
+            context, evidence = _lat_compact_sources(results, OLLAMA_LATERAL_MAX_CONTEXT_CHARS)
+
+            if not req.allow_ollama:
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "rag_only",
+                    "answer": "Encontré fuentes relacionadas. Ollama está desactivado para esta solicitud.",
+                    "route": route,
+                    "sources": evidence,
+                    "evidence": evidence,
+                    "count": len(evidence),
+                    "seconds": round(time.time() - started, 3),
+                    "ollama_used": False,
+                    "chat_lateral_v2": True,
+                })
+                return
+
+            if not context.strip():
+                context = "No se recuperó contexto suficiente desde RAG."
+
+            selected_model = (
+                OLLAMA_LATERAL_MODEL
+                if OLLAMA_LATERAL_FORCE_LIGHT
+                else ((req.model or "").strip() or OLLAMA_LATERAL_MODEL)
+            )
+
+            prompt = f"""
+Eres JoMelAI Curriculista. Responde en español, breve, académico y directo.
+Usa primero el contexto recuperado. Si el contexto no alcanza, dilo explícitamente.
+No inventes cifras. Para conteos exactos, indica que se use DuckDB.
+
+Contexto:
+{context}
+
+Pregunta:
+{req.question}
+
+Respuesta breve:
+""".strip()
+
+            payload = {
+                "model": selected_model,
+                "prompt": prompt,
+                "stream": True,
+                "keep_alive": OLLAMA_LATERAL_KEEP_ALIVE,
+                "options": {
+                    "temperature": 0.18,
+                    "top_p": 0.80,
+                    "num_ctx": OLLAMA_LATERAL_NUM_CTX,
+                    "num_predict": OLLAMA_LATERAL_NUM_PREDICT,
+                },
+            }
+
+            answer_parts = []
+
+            try:
+                r = requests.post(
+                    f"{OLLAMA_BASE_URL}/api/generate",
+                    json=payload,
+                    stream=True,
+                    timeout=OLLAMA_LATERAL_TIMEOUT,
+                )
+
+                if r.status_code >= 400 and selected_model != OLLAMA_LATERAL_FALLBACK_MODEL:
+                    selected_model = OLLAMA_LATERAL_FALLBACK_MODEL
+                    payload["model"] = selected_model
+                    r = requests.post(
+                        f"{OLLAMA_BASE_URL}/api/generate",
+                        json=payload,
+                        stream=True,
+                        timeout=OLLAMA_LATERAL_TIMEOUT,
+                    )
+
+                if r.status_code >= 400:
+                    raise RuntimeError(f"Ollama respondió HTTP {r.status_code}: {r.text[:300]}")
+
+                for raw in r.iter_lines():
+                    if not raw:
+                        continue
+                    try:
+                        data = json.loads(raw.decode("utf-8"))
+                    except Exception:
+                        continue
+
+                    token = str(data.get("response") or "")
+                    if token:
+                        answer_parts.append(token)
+                        yield _lat_sse("token", {"text": token})
+
+                    if data.get("done"):
+                        break
+
+                answer = "".join(answer_parts).strip()
+
+                yield _lat_sse("final", {
+                    "ok": True,
+                    "mode": "rag_ollama_light_stream",
+                    "answer": answer,
+                    "route": route,
+                    "sources": evidence,
+                    "evidence": evidence,
+                    "count": len(evidence),
+                    "ollama_used": True,
+                    "model_used": selected_model,
+                    "seconds": round(time.time() - started, 3),
+                    "chat_lateral_v2": True,
+                })
+
+            except Exception as exc:
+                fallback_answer = (
+                    "Encontré contexto relacionado, pero Ollama no respondió correctamente. "
+                    "Revisa las fuentes recuperadas o intenta una pregunta más específica."
+                )
+                yield _lat_sse("token", {"text": fallback_answer})
+                yield _lat_sse("final", {
+                    "ok": False,
+                    "mode": "rag_ollama_light_stream",
+                    "answer": fallback_answer,
+                    "route": route,
+                    "sources": evidence,
+                    "evidence": evidence,
+                    "count": len(evidence),
+                    "ollama_used": True,
+                    "model_used": selected_model,
+                    "error": str(exc),
+                    "seconds": round(time.time() - started, 3),
+                    "chat_lateral_v2": True,
+                })
+
+        except Exception as exc:
+            yield _lat_sse("final", {
+                "ok": False,
+                "mode": "chat_lateral_error",
+                "answer": "",
+                "message": str(exc),
+                "seconds": round(time.time() - started, 3),
+                "chat_lateral_v2": True,
+            })
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# === CHAT LATERAL V2 PATCH END ===
+'''
+
+if start in text and end in text:
+    text = re.sub(
+        re.escape(start) + r".*?" + re.escape(end),
+        patch.strip(),
+        text,
+        flags=re.S,
+    )
+else:
+    text = text.rstrip() + "\n\n\n" + patch.strip() + "\n"
+
+path.write_text(text, encoding="utf-8")
+PY
+
+echo
+echo "== 8) Agregando proxy backend si es Laravel/PHP =="
+ROUTES_FILE=""
+for f in routes/api.php backend/routes/api.php app/routes/api.php; do
+  if [ -f "$f" ]; then
+    ROUTES_FILE="$f"
+    break
+  fi
+done
+
+if [ -n "$ROUTES_FILE" ]; then
+  echo "Archivo de rutas detectado: $ROUTES_FILE"
+  cp "$ROUTES_FILE" "${ROUTES_FILE}.bak.chatv2.$(date +%Y%m%d_%H%M%S)"
+
+  if ! grep -q "CHAT LATERAL V2 PROXY START" "$ROUTES_FILE"; then
+    cat >> "$ROUTES_FILE" <<'PHP'
+
+// === CHAT LATERAL V2 PROXY START ===
+// Proxy hacia Data Engine. Mantiene APIs nuevas sin romper las existentes.
+Route::post('/chat-lateral/route', function (\Illuminate\Http\Request $request) {
+    $base = rtrim(env('DATA_ENGINE_URL', env('SILABO_ENGINE_URL', 'http://data-engine:8000')), '/');
+    $response = \Illuminate\Support\Facades\Http::timeout(90)
+        ->post($base . '/chat-lateral/route', $request->all());
+
+    return response($response->body(), $response->status())
+        ->header('Content-Type', $response->header('Content-Type') ?: 'application/json');
+});
+
+Route::post('/chat-lateral/ask', function (\Illuminate\Http\Request $request) {
+    $base = rtrim(env('DATA_ENGINE_URL', env('SILABO_ENGINE_URL', 'http://data-engine:8000')), '/');
+    $response = \Illuminate\Support\Facades\Http::timeout(180)
+        ->post($base . '/chat-lateral/ask', $request->all());
+
+    return response($response->body(), $response->status())
+        ->header('Content-Type', $response->header('Content-Type') ?: 'application/json');
+});
+
+Route::post('/chat-lateral/ask-stream', function (\Illuminate\Http\Request $request) {
+    $base = rtrim(env('DATA_ENGINE_URL', env('SILABO_ENGINE_URL', 'http://data-engine:8000')), '/');
+    $payload = json_encode($request->all(), JSON_UNESCAPED_UNICODE);
+
+    return response()->stream(function () use ($base, $payload) {
+        $ch = curl_init($base . '/chat-lateral/ask-stream');
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_WRITEFUNCTION => function ($ch, $data) {
+                echo $data;
+                if (ob_get_level() > 0) {
+                    @ob_flush();
+                }
+                flush();
+                return strlen($data);
+            },
+            CURLOPT_TIMEOUT => 180,
+        ]);
+
+        curl_exec($ch);
+        curl_close($ch);
+    }, 200, [
+        'Content-Type' => 'text/event-stream',
+        'Cache-Control' => 'no-cache',
+        'X-Accel-Buffering' => 'no',
+        'Connection' => 'keep-alive',
+    ]);
+});
+// === CHAT LATERAL V2 PROXY END ===
+PHP
+  else
+    echo "Proxy backend ya existía, no se duplicó."
+  fi
+else
+  echo "No detecté routes/api.php. Crearé proxy PHP standalone opcional."
+  mkdir -p backend
+  cat > backend/chat_lateral_proxy.php <<'PHP'
+<?php
+$base = getenv('DATA_ENGINE_URL') ?: 'http://data-engine:8000';
+$path = $_GET['path'] ?? 'ask';
+$allowed = [
+  'route' => '/chat-lateral/route',
+  'ask' => '/chat-lateral/ask',
+  'ask-stream' => '/chat-lateral/ask-stream',
+];
+if (!isset($allowed[$path])) {
+  http_response_code(404);
+  echo json_encode(['ok' => false, 'message' => 'Ruta no permitida']);
+  exit;
+}
+$payload = file_get_contents('php://input');
+$ch = curl_init(rtrim($base, '/') . $allowed[$path]);
+curl_setopt_array($ch, [
+  CURLOPT_POST => true,
+  CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+  CURLOPT_POSTFIELDS => $payload,
+  CURLOPT_RETURNTRANSFER => $path !== 'ask-stream',
+  CURLOPT_TIMEOUT => 180,
+]);
+if ($path === 'ask-stream') {
+  header('Content-Type: text/event-stream');
+  header('Cache-Control: no-cache');
+  curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
+    echo $data;
+    @ob_flush();
+    flush();
+    return strlen($data);
+  });
+  curl_exec($ch);
+  curl_close($ch);
+  exit;
+}
+$out = curl_exec($ch);
+$code = curl_getinfo($ch, CURLINFO_HTTP_CODE) ?: 200;
+curl_close($ch);
+http_response_code($code);
+header('Content-Type: application/json');
+echo $out;
+PHP
+fi
+
+echo
+echo "== 9) Actualizando frontend para preferir APIs nuevas =="
+FRONT_TARGET_DIR=""
+
+for d in frontend/public public frontend/src src app; do
+  if [ -d "$d" ]; then
+    FRONT_TARGET_DIR="$d"
+    break
+  fi
+done
+
+if [ -z "$FRONT_TARGET_DIR" ]; then
+  FRONT_TARGET_DIR="public"
+  mkdir -p "$FRONT_TARGET_DIR"
+fi
+
+echo "Directorio frontend elegido: $FRONT_TARGET_DIR"
+
+cat > "$FRONT_TARGET_DIR/chat-lateral-v2-client.js" <<'JS'
+(function () {
+  const DEFAULT_ENDPOINTS = [
+    '/api/chat-lateral/ask-stream',
+    '/chat-lateral/ask-stream',
+    '/api/chat-lateral/ask',
+    '/chat-lateral/ask'
+  ];
+
+  async function postJson(url, payload) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {})
+    });
+    if (!res.ok) {
+      throw new Error('HTTP ' + res.status + ' en ' + url);
+    }
+    return res;
+  }
+
+  async function askStream(question, handlers, options) {
+    handlers = handlers || {};
+    options = options || {};
+
+    const payload = {
+      question,
+      table: options.table || 'silabos',
+      collection: options.collection || 'silabos',
+      n_results: options.n_results || 2,
+      stream: true,
+      prefer_duckdb: true,
+      prefer_rag: true,
+      allow_ollama: options.allow_ollama !== false,
+      chart: true,
+      limit: options.limit || 100
+    };
+
+    const endpoints = options.endpoints || window.JOMELAI_CHAT_LATERAL_ENDPOINTS || DEFAULT_ENDPOINTS;
+    let lastError = null;
+
+    for (const url of endpoints) {
+      try {
+        const res = await postJson(url, payload);
+        const contentType = res.headers.get('content-type') || '';
+
+        if (!contentType.includes('text/event-stream')) {
+          const data = await res.json();
+          if (handlers.onFinal) handlers.onFinal(data);
+          return data;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let finalData = null;
+
+        while (true) {
+          const read = await reader.read();
+          if (read.done) break;
+
+          buffer += decoder.decode(read.value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() || '';
+
+          for (const part of parts) {
+            const lines = part.split('\n');
+            let event = 'message';
+            let dataLine = '';
+
+            for (const line of lines) {
+              if (line.startsWith('event:')) event = line.slice(6).trim();
+              if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+            }
+
+            if (!dataLine) continue;
+
+            let data = {};
+            try { data = JSON.parse(dataLine); } catch (e) { data = { raw: dataLine }; }
+
+            if (event === 'ready' && handlers.onReady) handlers.onReady(data);
+            if (event === 'config' && handlers.onConfig) handlers.onConfig(data);
+            if (event === 'token' && handlers.onToken) handlers.onToken(data.text || '', data);
+            if (event === 'final') {
+              finalData = data;
+              if (handlers.onFinal) handlers.onFinal(data);
+            }
+          }
+        }
+
+        return finalData || { ok: true };
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error('No se pudo conectar al chat lateral v2');
+  }
+
+  window.JoMelAiChatLateralV2 = {
+    askStream
+  };
+
+  window.jomelaiChatLateralAskStream = askStream;
+})();
+JS
+
+# Inyectar script en index.html si existe.
+for html in index.html frontend/index.html public/index.html frontend/public/index.html; do
+  if [ -f "$html" ]; then
+    if ! grep -q "chat-lateral-v2-client.js" "$html"; then
+      cp "$html" "${html}.bak.chatv2.$(date +%Y%m%d_%H%M%S)"
+      sed -i 's#</body>#  <script src="/chat-lateral-v2-client.js"></script>\n</body>#' "$html" || true
+      echo "Script frontend inyectado en $html"
+    fi
+  fi
+done
+
+echo
+echo "== 10) Parche conservador en JS existente: endpoints/modelo pesado =="
+JS_FILES="$(grep -Rsl "ask_stream\|rag/answer\|qwen2.5-coder:3b\|num_predict.*700\|tokens_config" frontend public src app 2>/dev/null || true)"
+
+if [ -n "$JS_FILES" ]; then
+  echo "$JS_FILES" | while read file; do
+    [ -z "$file" ] && continue
+    [ ! -f "$file" ] && continue
+
+    case "$file" in
+      *.bak*) continue ;;
+    esac
+
+    echo "Parcheando JS: $file"
+    cp "$file" "${file}.bak.chatv2.$(date +%Y%m%d_%H%M%S)"
+
+    sed -i \
+      -e "s#qwen2.5-coder:3b#$FINAL_LATERAL_MODEL#g" \
+      -e "s#qwen2.5-coder:1.5b#$FINAL_LATERAL_MODEL#g" \
+      -e "s#/api/ask_stream#/api/chat-lateral/ask-stream#g" \
+      -e "s#/ask_stream#/api/chat-lateral/ask-stream#g" \
+      -e "s#/api/rag/answer#/api/chat-lateral/ask#g" \
+      -e "s#/rag/answer#/api/chat-lateral/ask#g" \
+      -e "s/num_ctx:[[:space:]]*4096/num_ctx: $LATERAL_NUM_CTX/g" \
+      -e "s/num_ctx:[[:space:]]*2048/num_ctx: $LATERAL_NUM_CTX/g" \
+      -e "s/num_predict:[[:space:]]*700/num_predict: $LATERAL_NUM_PREDICT/g" \
+      "$file" || true
+  done
+else
+  echo "No encontré JS con referencias directas a ask_stream/rag/answer/modelo pesado."
+fi
+
+echo
+echo "== 11) Rebuild/restart completo =="
+docker compose down
+docker compose up -d --build
+
+echo
+echo "== 12) Detectando contenedor Data Engine para pruebas =="
+if [ -z "${DATA_ENGINE_SERVICE:-}" ]; then
+  DATA_ENGINE_SERVICE="$(docker compose config --services | grep -Ei 'data-engine|data_engine|engine|silabo|api' | head -1 || true)"
+fi
+
+if [ -z "$DATA_ENGINE_SERVICE" ]; then
+  echo "ADVERTENCIA: no detecté servicio Data Engine para test automático."
+  docker compose ps
+  exit 0
+fi
+
+DATA_ENGINE_CONTAINER="$(docker compose ps -q "$DATA_ENGINE_SERVICE" || true)"
+if [ -z "$DATA_ENGINE_CONTAINER" ]; then
+  echo "ADVERTENCIA: no detecté contenedor Data Engine."
+  docker compose ps
+  exit 0
+fi
+
+echo "Data Engine service: $DATA_ENGINE_SERVICE"
+echo "Data Engine container: $DATA_ENGINE_CONTAINER"
+
+echo
+echo "== 13) Prueba 1: ruta DuckDB rápida =="
+docker exec "$DATA_ENGINE_CONTAINER" python3 - <<'PYTEST1' || true
+import json, urllib.request, time
+
+payload = json.dumps({
+  "question": "qué carreras tienes cargadas",
+  "table": "silabos",
+  "collection": "silabos",
+  "n_results": 2,
+  "limit": 20
+}).encode("utf-8")
+
+req = urllib.request.Request(
+  "http://127.0.0.1:8000/chat-lateral/ask",
+  data=payload,
+  headers={"Content-Type": "application/json"},
+  method="POST"
+)
+
+t = time.time()
+try:
+    with urllib.request.urlopen(req, timeout=60) as r:
+        body = r.read().decode("utf-8")
+        print("SECONDS", round(time.time() - t, 3))
+        print(body[:2000])
+except Exception as e:
+    print("ERROR_TEST_DUCKDB", repr(e))
+PYTEST1
+
+echo
+echo "== 14) Prueba 2: stream chat lateral =="
+docker exec "$DATA_ENGINE_CONTAINER" python3 - <<'PYTEST2' || true
+import json, urllib.request, time
+
+payload = json.dumps({
+  "question": "sugiere brevemente una actividad para un curso de investigación",
+  "table": "silabos",
+  "collection": "silabos",
+  "n_results": 2,
+  "limit": 20
+}).encode("utf-8")
+
+req = urllib.request.Request(
+  "http://127.0.0.1:8000/chat-lateral/ask-stream",
+  data=payload,
+  headers={"Content-Type": "application/json"},
+  method="POST"
+)
+
+t = time.time()
+try:
+    with urllib.request.urlopen(req, timeout=120) as r:
+        body = r.read(5000).decode("utf-8", errors="replace")
+        print("SECONDS_FIRST_READ", round(time.time() - t, 3))
+        print(body)
+except Exception as e:
+    print("ERROR_TEST_STREAM", repr(e))
+PYTEST2
+
+echo
+echo "== 15) Estado final =="
+docker compose ps
+
+echo
+echo "== Modelos Ollama =="
+docker exec "$(docker compose ps -q "$OLLAMA_SERVICE")" ollama list || true
+
+echo
+echo "=================================================="
+echo " LISTO"
+echo "=================================================="
+echo "APIs nuevas Data Engine:"
+echo "  POST /chat-lateral/route"
+echo "  POST /chat-lateral/ask"
+echo "  POST /chat-lateral/ask-stream"
+echo
+echo "APIs proxy backend si Laravel fue detectado:"
+echo "  POST /api/chat-lateral/route"
+echo "  POST /api/chat-lateral/ask"
+echo "  POST /api/chat-lateral/ask-stream"
+echo
+echo "Modelo SOLO chat lateral: $FINAL_LATERAL_MODEL"
+echo "num_ctx: $LATERAL_NUM_CTX"
+echo "num_predict: $LATERAL_NUM_PREDICT"
+echo
+echo "Abre el chat lateral y prueba:"
+echo "  1) qué carreras tienes cargadas"
+echo "  2) sugiere brevemente una actividad para un curso de investigación"

@@ -1,6 +1,6 @@
 /* JOMELAI_STREAM_PRETTY_CONTINGENCY_V1 */
 (function () {
-  const MODEL = 'qwen2.5:0.5b';
+  const MODEL = 'qwen2.5-coder:1.5b';
 
   const S = window.JM_STREAM_PRETTY = window.JM_STREAM_PRETTY || {
     chat: {},
@@ -580,7 +580,7 @@
         context: 'chat',
         model: MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 2,
         temperature: 0.22,
         top_p: 0.85
@@ -655,7 +655,7 @@
         context: 'chat_continue',
         model: MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 0,
         temperature: 0.14,
         top_p: 0.85
@@ -871,7 +871,7 @@
         context: 'resource',
         model: MODEL,
         max_tokens: 1300,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 1,
         temperature: 0.22,
         top_p: 0.85
@@ -950,7 +950,7 @@
         context: 'resource_continue',
         model: MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 0,
         temperature: 0.12,
         top_p: 0.85

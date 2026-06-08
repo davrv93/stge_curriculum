@@ -1,5 +1,5 @@
 # Entorno
-
+data/backend/storage/sessions/*
 # Dependencias
 node_modules/
 vendor/

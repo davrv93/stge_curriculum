@@ -2637,7 +2637,7 @@ async function techAskRag() {
     toast("Escribe una pregunta", "error");
     return;
   }
-  const r = await api("POST", "/api/chat-lateral/ask", {
+  const r = await api("POST", "/api/rag/answer", {
     question: q,
     collection: techVal("tech-collection") || "silabos",
     n_results: 5,
@@ -2799,7 +2799,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 /* JOMELAI_APP_STREAM_PRETTY_FULL_V1_START */
 (function () {
-  const JM_MODEL = 'qwen2.5:0.5b';
+  const JM_MODEL = 'qwen2.5-coder:1.5b';
 
   const JM = window.JM_STREAM_PRETTY = window.JM_STREAM_PRETTY || {
     chat: {},
@@ -3442,7 +3442,7 @@ document.addEventListener("DOMContentLoaded", () => {
         context: 'chat',
         model: JM_MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 2,
         temperature: 0.22,
         top_p: 0.85
@@ -3519,7 +3519,7 @@ document.addEventListener("DOMContentLoaded", () => {
         context: 'chat_continue',
         model: JM_MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 0,
         temperature: 0.14,
         top_p: 0.85
@@ -3749,7 +3749,7 @@ document.addEventListener("DOMContentLoaded", () => {
         context: 'resource',
         model: JM_MODEL,
         max_tokens: 1300,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 1,
         temperature: 0.22,
         top_p: 0.85
@@ -3829,7 +3829,7 @@ document.addEventListener("DOMContentLoaded", () => {
         context: 'resource_continue',
         model: JM_MODEL,
         max_tokens: 700,
-        num_ctx: 1024,
+        num_ctx: 2048,
         n_results: 0,
         temperature: 0.12,
         top_p: 0.85

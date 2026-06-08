@@ -2069,7 +2069,7 @@ SELECT * FROM silabos LIMIT 10</textarea
                   ><input
                     class="field-input"
                     id="natModel"
-                    value="qwen2.5:0.5b"
+                    value="qwen2.5-coder:1.5b"
                   />
                 </div>
                 <div>
@@ -2212,7 +2212,7 @@ competencias de ética, responsabilidad social y formación integral en ingenier
                   ><input
                     class="field-input"
                     id="ragAnswerModel"
-                    value="qwen2.5:0.5b"
+                    value="qwen2.5-coder:1.5b"
                   />
                 </div>
                 <div>
@@ -2308,7 +2308,7 @@ SELECT programa, COUNT(*) AS total FROM silabos GROUP BY programa ORDER BY total
                     ><input
                       class="field-input"
                       id="chartModel"
-                      value="qwen2.5:0.5b"
+                      value="qwen2.5-coder:1.5b"
                     />
                   </div>
                   <div>
@@ -2360,7 +2360,7 @@ Generar gráficos de barras por programa, distribución de créditos, porcentaje
                 ><input
                   class="field-input"
                   id="pyModel"
-                  value="qwen2.5:0.5b"
+                  value="qwen2.5-coder:1.5b"
                 />
                 <button
                   class="btn btn-purple"
