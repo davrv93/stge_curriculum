@@ -6,7 +6,7 @@
    - Agrega botón Continuar generación.
 */
 (function () {
-  const MODEL = 'qwen2.5-coder:3b';
+  const MODEL = 'llama3.2:1b';
 
   const STATE = window.JM_SYLLABUS_PRETTY_V5 = window.JM_SYLLABUS_PRETTY_V5 || {
     raw: '',

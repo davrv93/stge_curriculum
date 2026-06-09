@@ -1,0 +1,2459 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JoMelAi · Plataforma Curricular</title>
+    <!-- JOMELAI_MIGRATED_LEGACY_TECH_ROUTES_V1 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;600;700;800;900&family=Nunito:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- JOMELAI_PRELOAD_RV_123_AND_HASH_TECH_FIX -->
+    <!-- JOMELAI_INLINE_BRIDGE -->
+
+    <!-- JOMELAI_LAYERED_ARCHITECTURE_V1 -->
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/jomelai.css" />
+    <script src="/jomelai.js"></script>
+  </head>
+  <body>
+    <!-- Animated background -->
+    <div class="bg-layer bg-blue" id="bg-layer"></div>
+    <canvas id="particle-canvas"></canvas>
+    <div class="bubbles" id="bubbles"></div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- ══════════════════════════════════════════════════
+     LOGIN PAGE
+══════════════════════════════════════════════════ -->
+    <div id="login-page">
+      <div class="login-card">
+        <div class="login-logo">
+          <div class="logo-icon">JM</div>
+          <div class="logo-text">
+            <h1>JoMelAi</h1>
+            <span>Motor Curricular IA</span>
+          </div>
+        </div>
+        <h2 class="login-title">Bienvenido</h2>
+        <p class="login-subtitle">
+          Plataforma de diseño curricular potenciada por inteligencia artificial
+        </p>
+        <div class="form-group">
+          <label class="form-label">Correo institucional</label>
+          <input
+            type="email"
+            class="form-input"
+            id="login-email"
+            value="rv@local.test"
+            placeholder="usuario@upeu.edu.pe"
+            autocomplete="email"
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Contraseña</label>
+          <input
+            type="password"
+            class="form-input"
+            id="login-pass"
+            value="123"
+            placeholder="••••••••••"
+            autocomplete="current-password"
+          />
+        </div>
+        <div class="error-msg" id="login-error"></div>
+        <button class="btn-primary" id="login-btn" onclick="window.doLogin()">
+          <span id="login-btn-text">Ingresar a la plataforma</span>
+        </button>
+        <div class="login-demo">
+          ¿Sin cuenta? <a onclick="window.fillDemo()">Usar credenciales demo</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+     MAIN APP
+══════════════════════════════════════════════════ -->
+    <div id="app" style="display: none">
+      <!-- SIDEBAR -->
+      <nav id="sidebar">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-icon">JM</div>
+          <div class="sidebar-logo-text">
+            JoMelAi
+            <small>Curriculista</small>
+          </div>
+        </div>
+
+        <div class="sidebar-section-label">Panel principal</div>
+        <div
+          class="nav-item active"
+          data-page="dashboard"
+          onclick="window.navigate('dashboard')"
+        >
+          <svg
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+          Dashboard
+        </div>
+
+        <div class="sidebar-section-label">Diseño curricular</div>
+        <div
+          class="nav-item"
+          data-page="malla"
+          onclick="window.navigate('malla')"
+        >
+          <svg
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z" />
+          </svg>
+          Malla Curricular
+        </div>
+        <div
+          class="nav-item"
+          data-page="plan"
+          onclick="window.navigate('plan')"
+        >
+          <svg
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+          Plan de Estudios
+        </div>
+        <div
+          class="nav-item"
+          data-page="silabos"
+          onclick="window.navigate('silabos')"
+        >
+          <svg
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+          </svg>
+          Sílabos
+        </div>
+        <div
+          class="nav-item"
+          data-page="recursos"
+          onclick="window.navigate('recursos')"
+        >
+          <svg
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"
+            />
+          </svg>
+          Recursos de Aprendizaje
+        </div>
+        <div class="sidebar-section-label">Administración técnica</div>
+        <div
+          class="nav-item"
+          data-page="tecnico"
+          onclick="window.navigate('tecnico')"
+        >
+          <svg
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M4 7h16M4 12h16M4 17h10" />
+            <circle cx="18" cy="17" r="2" />
+          </svg>
+          Acceso técnico
+        </div>
+
+        <div class="sidebar-user">
+          <div class="user-info">
+            <div class="user-avatar" id="sidebar-avatar">C</div>
+            <div>
+              <div class="user-name" id="sidebar-name">Curriculista</div>
+              <div class="user-role" id="sidebar-role">Docente</div>
+            </div>
+            <button class="btn-logout" onclick="window.doLogout()">↪</button>
+          </div>
+        </div>
+      </nav>
+
+      <!-- MAIN CONTENT -->
+      <main id="main">
+        <!-- ═══════ DASHBOARD ═══════ -->
+        <section class="page active" id="page-dashboard">
+          <div class="welcome-banner">
+            <div>
+              <div class="welcome-title">
+                ¡Hola, <span id="welcome-name">Curriculista</span>! 👋
+              </div>
+              <div class="welcome-sub">
+                ¿Qué vamos a diseñar hoy? JoMelAi está listo para ayudarte.
+              </div>
+            </div>
+            <div class="jomelai-badge">
+              <div class="badge-dot"></div>
+              <span class="badge-text">⚡ Motor JoMelAi activo</span>
+            </div>
+          </div>
+
+          <!-- Quick ask JoMelAi -->
+          <div class="quick-ask">
+            <span class="quick-ask-icon">🤖</span>
+            <input
+              class="quick-ask-input"
+              id="dash-ask-input"
+              placeholder="Pregúntale algo a JoMelAi... ej. '¿Cómo estructuro una malla para Enfermería?'"
+              onkeydown="if (event.key === 'Enter') dashAsk();"
+            />
+            <button class="quick-ask-btn" onclick="window.dashAsk()">
+              Preguntar →
+            </button>
+          </div>
+
+          <!-- Stats -->
+          <div
+            class="cards-grid cards-4"
+            style="margin-bottom: 28px"
+            id="dash-stats"
+          >
+            <div class="card stat-card">
+              <div class="stat-icon" style="--icon-bg: rgba(34, 81, 197, 0.2)">
+                📁
+              </div>
+              <div class="stat-val" id="stat-projects">—</div>
+              <div class="stat-label">Proyectos curriculares</div>
+              <div class="stat-hint">Activos en el sistema</div>
+            </div>
+            <div class="card stat-card">
+              <div class="stat-icon" style="--icon-bg: rgba(192, 25, 42, 0.2)">
+                📄
+              </div>
+              <div class="stat-val" id="stat-syllabi">—</div>
+              <div class="stat-label">Sílabos generados</div>
+              <div class="stat-hint">Con IA curricular</div>
+            </div>
+            <div class="card stat-card">
+              <div class="stat-icon" style="--icon-bg: rgba(107, 33, 212, 0.2)">
+                🎓
+              </div>
+              <div class="stat-val" id="stat-queries">—</div>
+              <div class="stat-label">Consultas JoMelAi</div>
+              <div class="stat-hint">Motor inteligente</div>
+            </div>
+            <div class="card stat-card">
+              <div class="stat-icon" style="--icon-bg: rgba(34, 197, 94, 0.1)">
+                ✅
+              </div>
+              <div class="stat-val" id="stat-published">—</div>
+              <div class="stat-label">Versiones aprobadas</div>
+              <div class="stat-hint">Listas para publicar</div>
+            </div>
+          </div>
+
+          <!-- Action cards -->
+          <div
+            style="
+              margin-bottom: 12px;
+              font-size: 12px;
+              font-weight: 700;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              color: var(--text-muted);
+            "
+          >
+            Acciones rápidas
+          </div>
+          <div class="cards-grid cards-4">
+            <div
+              class="card action-card"
+              style="
+                --ac-bg: rgba(34, 81, 197, 0.1);
+                --ac-border: rgba(59, 114, 240, 0.2);
+                --ac-hover: rgba(34, 81, 197, 0.18);
+                --ac-shadow: var(--glow-blue);
+                --ac-icon-bg: rgba(34, 81, 197, 0.2);
+              "
+              onclick="window.navigate('malla')"
+            >
+              <div class="ac-icon">📊</div>
+              <h3>Nueva Malla</h3>
+              <p>
+                Crea y genera mallas curriculares con IA por ciclos y áreas
+                formativas
+              </p>
+              <div class="ac-arrow">→</div>
+            </div>
+            <div
+              class="card action-card"
+              style="
+                --ac-bg: rgba(107, 33, 212, 0.1);
+                --ac-border: rgba(139, 69, 245, 0.2);
+                --ac-hover: rgba(107, 33, 212, 0.18);
+                --ac-shadow: var(--glow-purple);
+                --ac-icon-bg: rgba(107, 33, 212, 0.2);
+              "
+              onclick="window.navigate('plan')"
+            >
+              <div class="ac-icon">📋</div>
+              <h3>Plan de Estudios</h3>
+              <p>
+                Asistente de 6 pasos para diseñar planes completos con perfil de
+                egreso
+              </p>
+              <div class="ac-arrow">→</div>
+            </div>
+            <div
+              class="card action-card"
+              style="
+                --ac-bg: rgba(192, 25, 42, 0.1);
+                --ac-border: rgba(229, 40, 61, 0.2);
+                --ac-hover: rgba(192, 25, 42, 0.18);
+                --ac-shadow: var(--glow-red);
+                --ac-icon-bg: rgba(192, 25, 42, 0.2);
+              "
+              onclick="window.navigate('silabos')"
+            >
+              <div class="ac-icon">📝</div>
+              <h3>Generar Sílabo</h3>
+              <p>
+                Crea sílabos académicos detallados con semanas, competencias y
+                evidencias
+              </p>
+              <div class="ac-arrow">→</div>
+            </div>
+            <div
+              class="card action-card"
+              style="
+                --ac-bg: rgba(234, 88, 12, 0.1);
+                --ac-border: rgba(251, 146, 60, 0.2);
+                --ac-hover: rgba(234, 88, 12, 0.18);
+                --ac-shadow: 0 0 40px rgba(234, 88, 12, 0.3);
+                --ac-icon-bg: rgba(234, 88, 12, 0.2);
+              "
+              onclick="window.navigate('recursos')"
+            >
+              <div class="ac-icon">🎯</div>
+              <h3>Recursos IA</h3>
+              <p>
+                Genera actividades, rúbricas, lecturas y recursos de aprendizaje
+                con JoMelAi
+              </p>
+              <div class="ac-arrow">→</div>
+            </div>
+          </div>
+
+          <!-- Recent projects -->
+          <hr class="divider" />
+          <div
+            style="
+              margin-bottom: 16px;
+              font-size: 12px;
+              font-weight: 700;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              color: var(--text-muted);
+            "
+          >
+            Proyectos recientes
+          </div>
+          <div
+            id="recent-projects-list"
+            style="display: flex; flex-direction: column; gap: 10px"
+          ></div>
+        </section>
+
+        <!-- ═══════ MALLA CURRICULAR ═══════ -->
+        <section class="page" id="page-malla">
+          <div class="page-header">
+            <div
+              class="page-tag"
+              style="
+                --tag-bg: rgba(34, 81, 197, 0.15);
+                --tag-border: rgba(59, 114, 240, 0.3);
+                --tag-color: var(--blue-300);
+              "
+            >
+              ⚡ Motor JoMelAi · Currículum Engine
+            </div>
+            <h2>Malla Curricular</h2>
+            <p>
+              Diseña la estructura de cursos por ciclos con asistencia de
+              inteligencia artificial
+            </p>
+          </div>
+
+          <div
+            class="cards-grid cards-2"
+            style="margin-bottom: 28px; align-items: start"
+          >
+            <!-- Form -->
+            <div class="card">
+              <h3
+                style="
+                  font-family: &quot;Exo 2&quot;, sans-serif;
+                  font-size: 18px;
+                  font-weight: 700;
+                  margin-bottom: 20px;
+                "
+              >
+                ⚙️ Configurar malla
+              </h3>
+              <div class="form-row">
+                <div class="field-group">
+                  <label class="field-label">Facultad</label>
+                  <input
+                    class="field-input"
+                    id="m-faculty"
+                    placeholder="Ej: Ingeniería"
+                  />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Programa</label>
+                  <input
+                    class="field-input"
+                    id="m-program"
+                    placeholder="Ej: Sistemas"
+                  />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="field-group">
+                  <label class="field-label">Ciclos</label>
+                  <input
+                    class="field-input"
+                    id="m-cycles"
+                    type="number"
+                    value="10"
+                    min="4"
+                    max="14"
+                  />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Créditos meta</label>
+                  <input
+                    class="field-input"
+                    id="m-credits"
+                    type="number"
+                    value="200"
+                    min="50"
+                    max="300"
+                  />
+                </div>
+              </div>
+              <div class="field-group">
+                <label class="field-label">Perfil de egreso (resumen)</label>
+                <textarea
+                  class="field-textarea"
+                  id="m-profile"
+                  placeholder="Describe las competencias principales del egresado..."
+                  style="min-height: 80px"
+                ></textarea>
+              </div>
+              <div class="field-group">
+                <label class="field-label">Énfasis curricular</label>
+                <input
+                  class="field-input"
+                  id="m-emphasis"
+                  placeholder="Ej: competencias digitales, investigación, ética"
+                />
+              </div>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap">
+                <button
+                  class="btn btn-blue"
+                  onclick="window.generateMalla()"
+                  id="btn-gen-malla"
+                >
+                  <span>🤖 Generar con JoMelAi</span>
+                </button>
+                <button
+                  class="btn btn-ghost"
+                  onclick="window.saveMallaProject()"
+                >
+                  💾 Guardar proyecto
+                </button>
+              </div>
+            </div>
+
+            <!-- Info / Framework -->
+            <div
+              class="card"
+              style="
+                background: rgba(34, 81, 197, 0.08);
+                border-color: rgba(59, 114, 240, 0.15);
+              "
+            >
+              <h3
+                style="
+                  font-family: &quot;Exo 2&quot;, sans-serif;
+                  font-size: 16px;
+                  font-weight: 700;
+                  margin-bottom: 16px;
+                  color: var(--blue-300);
+                "
+              >
+                📌 Principios del diseño curricular
+              </h3>
+              <div
+                id="framework-principles"
+                style="display: flex; flex-direction: column; gap: 10px"
+              ></div>
+            </div>
+          </div>
+
+          <!-- Generated malla -->
+          <div id="malla-result-section" style="display: none">
+            <hr class="divider" />
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 16px;
+              "
+            >
+              <div>
+                <div
+                  style="
+                    font-family: &quot;Exo 2&quot;, sans-serif;
+                    font-size: 20px;
+                    font-weight: 800;
+                  "
+                >
+                  Malla generada
+                </div>
+                <div
+                  style="
+                    font-size: 13px;
+                    color: var(--text-muted);
+                    margin-top: 2px;
+                  "
+                  id="malla-meta"
+                ></div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="window.copyMalla()">
+                📋 Copiar
+              </button>
+            </div>
+            <div class="malla-grid" id="malla-grid"></div>
+            <div
+              class="ai-result-box"
+              id="malla-ai-note"
+              style="display: none"
+            ></div>
+          </div>
+        </section>
+
+        <!-- ═══════ PLAN DE ESTUDIOS ═══════ -->
+        <section class="page" id="page-plan">
+          <div class="page-header">
+            <div
+              class="page-tag"
+              style="
+                --tag-bg: rgba(107, 33, 212, 0.15);
+                --tag-border: rgba(139, 69, 245, 0.3);
+                --tag-color: var(--purple-300);
+              "
+            >
+              ⚡ Motor JoMelAi · Curriculum Planner
+            </div>
+            <h2>Plan de Estudios</h2>
+            <p>
+              Asistente paso a paso para crear planes curriculares completos y
+              validados
+            </p>
+          </div>
+
+          <!-- Step indicator -->
+          <div class="wizard-steps" id="plan-wizard-steps"></div>
+
+          <!-- Step content -->
+          <div class="plan-wizard" id="plan-wizard-body">
+            <div class="plan-wizard-header">
+              <div>
+                <div
+                  style="
+                    font-family: &quot;Exo 2&quot;, sans-serif;
+                    font-size: 16px;
+                    font-weight: 800;
+                  "
+                  id="plan-step-title"
+                >
+                  Paso 1
+                </div>
+                <div
+                  style="
+                    font-size: 12px;
+                    color: var(--text-muted);
+                    margin-top: 3px;
+                  "
+                  id="plan-step-desc"
+                ></div>
+              </div>
+              <div class="plan-step-indicator" id="plan-step-dots"></div>
+            </div>
+            <div class="plan-wizard-body" id="plan-step-content"></div>
+            <div
+              style="
+                padding: 0 24px 24px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+              "
+            >
+              <button
+                class="btn btn-ghost"
+                id="btn-plan-prev"
+                onclick="window.planPrev()"
+                style="display: none"
+              >
+                ← Anterior
+              </button>
+              <div style="margin-left: auto; display: flex; gap: 10px">
+                <button
+                  class="btn btn-purple"
+                  id="btn-plan-ask"
+                  onclick="window.planAskAi()"
+                >
+                  🤖 Sugerencias IA
+                </button>
+                <button
+                  class="btn btn-blue"
+                  id="btn-plan-next"
+                  onclick="window.planNext()"
+                >
+                  Siguiente →
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Plan AI result -->
+          <div id="plan-result-section" style="display: none; margin-top: 24px">
+            <div
+              class="card"
+              style="
+                background: rgba(107, 33, 212, 0.08);
+                border-color: rgba(139, 69, 245, 0.15);
+              "
+            >
+              <h3
+                style="
+                  font-family: &quot;Exo 2&quot;, sans-serif;
+                  font-size: 18px;
+                  font-weight: 700;
+                  margin-bottom: 16px;
+                "
+              >
+                📋 Plan generado por JoMelAi
+              </h3>
+              <div
+                class="ai-result-box"
+                id="plan-ai-output"
+                style="
+                  background: rgba(107, 33, 212, 0.08);
+                  border-color: rgba(139, 69, 245, 0.2);
+                "
+              ></div>
+              <div style="margin-top: 16px; display: flex; gap: 10px">
+                <button class="btn btn-purple" onclick="window.copyPlan()">
+                  📋 Copiar plan
+                </button>
+                <button
+                  class="btn btn-ghost"
+                  onclick="window.savePlanVersion()"
+                >
+                  💾 Guardar versión
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══════ SÍLABOS ═══════ -->
+        <section class="page" id="page-silabos">
+          <div class="page-header">
+            <div
+              class="page-tag"
+              style="
+                --tag-bg: rgba(192, 25, 42, 0.15);
+                --tag-border: rgba(229, 40, 61, 0.3);
+                --tag-color: var(--red-300);
+              "
+            >
+              ⚡ Motor JoMelAi · Syllabus Generator
+            </div>
+            <h2>Sílabos</h2>
+            <p>
+              Genera sílabos académicos completos con IA o busca en el
+              repositorio institucional
+            </p>
+          </div>
+
+          <div class="tabs">
+            <div class="tab active" onclick="switchSilaboTab('generate', this)">
+              ✨ Generar nuevo
+            </div>
+            <div class="tab" onclick="switchSilaboTab('search', this)">
+              🔍 Buscar sílabos
+            </div>
+          </div>
+
+          <!-- Generate tab -->
+          <div id="silabo-tab-generate">
+            <div class="cards-grid cards-2" style="align-items: start">
+              <div class="card">
+                <h3
+                  style="
+                    font-family: &quot;Exo 2&quot;, sans-serif;
+                    font-size: 17px;
+                    font-weight: 700;
+                    margin-bottom: 20px;
+                  "
+                >
+                  📝 Datos del curso
+                </h3>
+                <div class="form-row">
+                  <div class="field-group">
+                    <label class="field-label">Nombre del curso *</label>
+                    <input
+                      class="field-input"
+                      id="s-course"
+                      placeholder="Ej: Cálculo Diferencial"
+                    />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Programa</label>
+                    <input
+                      class="field-input"
+                      id="s-program"
+                      placeholder="Ej: Ingeniería de Sistemas"
+                    />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="field-group">
+                    <label class="field-label">Créditos</label>
+                    <input
+                      class="field-input"
+                      id="s-credits"
+                      type="number"
+                      value="4"
+                      min="1"
+                      max="10"
+                    />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Ciclo</label>
+                    <input
+                      class="field-input"
+                      id="s-cycle"
+                      placeholder="Ej: III"
+                    />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="field-group">
+                    <label class="field-label">Semanas</label>
+                    <input
+                      class="field-input"
+                      id="s-weeks"
+                      type="number"
+                      value="16"
+                      min="8"
+                      max="20"
+                    />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Modalidad</label>
+                    <select class="field-select field-input" id="s-modal">
+                      <option>Presencial</option>
+                      <option>Virtual</option>
+                      <option>Semipresencial</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Competencia del perfil</label>
+                  <textarea
+                    class="field-textarea"
+                    id="s-competency"
+                    placeholder="Describe la competencia del perfil de egreso que desarrolla este curso..."
+                    style="min-height: 70px"
+                  ></textarea>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">Aporte al perfil de egreso</label>
+                  <textarea
+                    class="field-textarea"
+                    id="s-profile"
+                    placeholder="¿Cómo contribuye este curso al perfil de egreso?"
+                    style="min-height: 60px"
+                  ></textarea>
+                </div>
+                <button
+                  class="btn btn-red"
+                  onclick="window.generateSilabo()"
+                  id="btn-gen-silabo"
+                  style="width: 100%"
+                >
+                  🤖 Generar sílabo con JoMelAi
+                </button>
+              </div>
+
+              <!-- Tips -->
+              <div
+                class="card"
+                style="
+                  background: rgba(192, 25, 42, 0.08);
+                  border-color: rgba(229, 40, 61, 0.15);
+                "
+              >
+                <h3
+                  style="
+                    font-family: &quot;Exo 2&quot;, sans-serif;
+                    font-size: 16px;
+                    font-weight: 700;
+                    margin-bottom: 16px;
+                    color: var(--red-300);
+                  "
+                >
+                  💡 ¿Cómo funciona?
+                </h3>
+                <div style="display: flex; flex-direction: column; gap: 14px">
+                  <div
+                    style="display: flex; gap: 12px; align-items: flex-start"
+                  >
+                    <div
+                      style="
+                        min-width: 28px;
+                        height: 28px;
+                        border-radius: 8px;
+                        background: rgba(229, 40, 61, 0.2);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 13px;
+                      "
+                    >
+                      1
+                    </div>
+                    <div
+                      style="
+                        font-size: 13px;
+                        color: var(--text-secondary);
+                        line-height: 1.5;
+                      "
+                    >
+                      Completa los datos del curso. Mientras más detalle, mejor
+                      resultado.
+                    </div>
+                  </div>
+                  <div
+                    style="display: flex; gap: 12px; align-items: flex-start"
+                  >
+                    <div
+                      style="
+                        min-width: 28px;
+                        height: 28px;
+                        border-radius: 8px;
+                        background: rgba(229, 40, 61, 0.2);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 13px;
+                      "
+                    >
+                      2
+                    </div>
+                    <div
+                      style="
+                        font-size: 13px;
+                        color: var(--text-secondary);
+                        line-height: 1.5;
+                      "
+                    >
+                      JoMelAi busca en el repositorio de sílabos institucionales
+                      para contextualizar.
+                    </div>
+                  </div>
+                  <div
+                    style="display: flex; gap: 12px; align-items: flex-start"
+                  >
+                    <div
+                      style="
+                        min-width: 28px;
+                        height: 28px;
+                        border-radius: 8px;
+                        background: rgba(229, 40, 61, 0.2);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 13px;
+                      "
+                    >
+                      3
+                    </div>
+                    <div
+                      style="
+                        font-size: 13px;
+                        color: var(--text-secondary);
+                        line-height: 1.5;
+                      "
+                    >
+                      Se genera un sílabo con resultados de aprendizaje,
+                      estrategias y cronograma.
+                    </div>
+                  </div>
+                  <div
+                    style="display: flex; gap: 12px; align-items: flex-start"
+                  >
+                    <div
+                      style="
+                        min-width: 28px;
+                        height: 28px;
+                        border-radius: 8px;
+                        background: rgba(229, 40, 61, 0.2);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 13px;
+                      "
+                    >
+                      4
+                    </div>
+                    <div
+                      style="
+                        font-size: 13px;
+                        color: var(--text-secondary);
+                        line-height: 1.5;
+                      "
+                    >
+                      Revisa, edita y exporta el sílabo final para aprobación
+                      del comité.
+                    </div>
+                  </div>
+                </div>
+                <hr class="divider" />
+                <div
+                  style="
+                    font-size: 11px;
+                    color: var(--text-muted);
+                    line-height: 1.6;
+                  "
+                >
+                  ⚠️ El sílabo generado es una
+                  <strong style="color: var(--text-secondary)"
+                    >propuesta preliminar</strong
+                  >. Requiere validación por el docente y aprobación del comité
+                  curricular antes de su uso oficial.
+                </div>
+              </div>
+            </div>
+
+            <!-- Result -->
+            <div
+              id="silabo-result"
+              class="silabo-workspace"
+              style="display: none"
+            >
+              <div class="syllabus-toolbar no-print">
+                <div>
+                  <h3>✅ Sílabo generado</h3>
+                  <p>
+                    Edita directamente cualquier sección y luego guarda o
+                    descarga.
+                  </p>
+                </div>
+
+                <div class="syllabus-actions">
+                  <button class="copy-btn" onclick="window.copySilabo()">
+                    📋 Copiar texto
+                  </button>
+                  <button class="copy-btn" onclick="window.saveSilaboDraft()">
+                    💾 Guardar borrador
+                  </button>
+                  <button
+                    class="copy-btn btn-pdf"
+                    onclick="window.downloadSilaboPdf()"
+                  >
+                    📄 Descargar PDF
+                  </button>
+                </div>
+              </div>
+
+              <div class="syllabus-layout">
+                <aside
+                  class="syllabus-index no-print"
+                  id="silabo-index"
+                ></aside>
+
+                <article class="syllabus-paper" id="silabo-paper">
+                  <div
+                    id="silabo-html"
+                    class="syllabus-document"
+                    contenteditable="true"
+                    spellcheck="true"
+                  ></div>
+                </article>
+              </div>
+
+              <textarea id="silabo-text" style="display: none"></textarea>
+            </div>
+          </div>
+
+          <!-- Search tab -->
+          <div id="silabo-tab-search" style="display: none">
+            <div class="search-bar">
+              <input
+                class="search-input"
+                id="silabo-search-q"
+                placeholder="Buscar cursos, programas, competencias..."
+                onkeydown="if (event.key === 'Enter') searchSilabos();"
+              />
+              <button class="btn btn-blue" onclick="window.searchSilabos()">
+                🔍 Buscar
+              </button>
+            </div>
+            <div id="silabo-search-results"></div>
+          </div>
+        </section>
+
+        <!-- ══════════════════════════════════════════════════════
+     RECURSOS DE APRENDIZAJE v2 — UPeU · JoMelAi
+     Reemplazar: <section class="page" id="page-recursos"> ... </section>
+══════════════════════════════════════════════════════ -->
+        <section class="page" id="page-recursos">
+          <!-- Header -->
+          <div class="page-header">
+            <div
+              class="page-tag"
+              style="
+                --tag-bg: rgba(192, 25, 42, 0.12);
+                --tag-border: rgba(192, 25, 42, 0.3);
+                --tag-color: #f87171;
+              "
+            >
+              ⚡ Motor JoMelAi · Learning Engine v2
+            </div>
+            <h2>Generador de Recursos de Aprendizaje</h2>
+            <p>
+              Diseña actividades, rúbricas, sesiones y más con contexto UPeU
+              pre-armado, alineado a SUNEDU y valores adventistas
+            </p>
+          </div>
+
+          <!-- Strip SUNEDU -->
+          <div class="sunedu-strip">
+            <span class="sunedu-strip-label">🔒 SUNEDU</span>
+            <span
+              class="sunedu-pill"
+              data-tip="Resultados de Aprendizaje verificables"
+              >RA · Resultados</span
+            >
+            <span
+              class="sunedu-pill"
+              data-tip="Metodología de enseñanza explícita"
+              >MET · Metodología</span
+            >
+            <span class="sunedu-pill" data-tip="Evaluación alineada al sílabo"
+              >EVAL · Evaluación</span
+            >
+            <span class="sunedu-pill" data-tip="Programación Didáctica"
+              >PD · Prog. Didáctica</span
+            >
+            <span class="sunedu-pill" data-tip="Bibliografía alineada"
+              >BIB · Bibliografía</span
+            >
+          </div>
+
+          <!-- ── Selector de tipo: 8 cards ESTÁTICOS ── -->
+          <div
+            style="
+              font-size: 11px;
+              font-weight: 700;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              color: var(--text-muted);
+              margin-bottom: 12px;
+            "
+          >
+            ¿Qué recurso quieres crear?
+          </div>
+
+          <div class="resource-type-grid-v2">
+            <div
+              class="rc-card sel"
+              id="rc-card-actividad"
+              style="
+                --rc-color: rgba(59, 114, 240, 0.45);
+                --rc-bg: rgba(34, 81, 197, 0.13);
+                --rc-text: #93c5fd;
+              "
+              onclick="window.rcSelectType('actividad')"
+            >
+              <span class="rc-emoji">🎯</span>
+              <div class="rc-label">Actividad de Aprendizaje</div>
+              <div class="rc-desc">
+                Tarea estructurada con instrucciones, evidencia y cotejo
+              </div>
+              <div class="rc-badges">
+                <span class="rc-badge">RA</span
+                ><span class="rc-badge">MET</span>
+              </div>
+              <div class="rc-bloom">Bloom: Aplicar · Analizar</div>
+            </div>
+
+            <div
+              class="rc-card"
+              id="rc-card-rubrica"
+              style="
+                --rc-color: rgba(192, 25, 42, 0.45);
+                --rc-bg: rgba(192, 25, 42, 0.13);
+                --rc-text: #fca5a5;
+              "
+              onclick="window.rcSelectType('rubrica')"
+            >
+              <span class="rc-emoji">📊</span>
+              <div class="rc-label">Rúbrica de Evaluación</div>
+              <div class="rc-desc">
+                Tabla analítica con niveles de desempeño y puntajes
+              </div>
+              <div class="rc-badges">
+                <span class="rc-badge">EVAL</span
+                ><span class="rc-badge">RA</span>
+              </div>
+              <div class="rc-bloom">Bloom: Evaluar</div>
+            </div>
+
+            <div
+              class="rc-card"
+              id="rc-card-sesion"
+              style="
+                --rc-color: rgba(8, 145, 178, 0.45);
+                --rc-bg: rgba(8, 145, 178, 0.13);
+                --rc-text: #67e8f9;
+              "
+              onclick="window.rcSelectType('sesion')"
+            >
+              <span class="rc-emoji">📋</span>
+              <div class="rc-label">Plan de Sesión</div>
+              <div class="rc-desc">
+                Inicio, proceso y cierre con estrategias y recursos
+              </div>
+              <div class="rc-badges">
+                <span class="rc-badge">PD</span
+                ><span class="rc-badge">MET</span>
+              </div>
+              <div class="rc-bloom">Bloom: Todos los niveles</div>
+            </div>
+
+            <div
+              class="rc-card"
+              id="rc-card-caso"
+              style="
+                --rc-color: rgba(234, 88, 12, 0.45);
+                --rc-bg: rgba(234, 88, 12, 0.13);
+                --rc-text: #fdba74;
+              "
+              onclick="window.rcSelectType('caso')"
+            >
+              <span class="rc-emoji">🔬</span>
+              <div class="rc-label">Caso Práctico</div>
+              <div class="rc-desc">
+                Situación real peruana con problemas auténticos
+              </div>
+              <div class="rc-badges">
+                <span class="rc-badge">MET</span
+                ><span class="rc-badge">RA</span>
+              </div>
+              <div class="rc-bloom">Bloom: Analizar · Crear</div>
+            </div>
+
+            <div
+              class="rc-card"
+              id="rc-card-secuencia"
+              style="
+                --rc-color: rgba(5, 150, 105, 0.45);
+                --rc-bg: rgba(5, 150, 105, 0.13);
+                --rc-text: #6ee7b7;
+              "
+              onclick="window.rcSelectType('secuencia')"
+            >
+              <span class="rc-emoji">🗺️</span>
+              <div class="rc-label">Secuencia Didáctica</div>
+              <div class="rc-desc">
+                Progresión de actividades para una unidad completa
+              </div>
+              <div class="rc-badges">
+                <span class="rc-badge">PD</span><span class="rc-badge">RA</span
+                ><span class="rc-badge">MET</span>
+              </div>
+              <div class="rc-bloom">Bloom: Progresión completa</div>
+            </div>
+
+            <div
+              class="rc-card"
+              id="rc-card-lectura"
+              style="
+                --rc-color: rgba(107, 33, 212, 0.45);
+                --rc-bg: rgba(107, 33, 212, 0.13);
+                --rc-text: #c4b5fd;
+              "
+              onclick="window.rcSelectType('lectura')"
+            >
+              <span class="rc-emoji">📚</span>
+              <div class="rc-label">Guía de Lectura Crítica</div>
+              <div class="rc-desc">
+                Preguntas guía, organizadores y comprensión profunda
+              </div>
+              <div class="rc-badges">
+                <span class="rc-badge">MET</span
+                ><span class="rc-badge">BIB</span>
+              </div>
+              <div class="rc-bloom">Bloom: Comprender · Analizar</div>
+            </div>
+
+            <div
+              class="rc-card"
+              id="rc-card-instrumento"
+              style="
+                --rc-color: rgba(217, 119, 6, 0.45);
+                --rc-bg: rgba(217, 119, 6, 0.13);
+                --rc-text: #fcd34d;
+              "
+              onclick="window.rcSelectType('instrumento')"
+            >
+              <span class="rc-emoji">✅</span>
+              <div class="rc-label">Instrumento de Evaluación</div>
+              <div class="rc-desc">
+                Prueba, lista de cotejo o escala con indicadores SUNEDU
+              </div>
+              <div class="rc-badges"><span class="rc-badge">EVAL</span></div>
+              <div class="rc-bloom">Bloom: Recordar · Aplicar</div>
+            </div>
+
+            <div
+              class="rc-card"
+              id="rc-card-mapa"
+              style="
+                --rc-color: rgba(190, 24, 93, 0.45);
+                --rc-bg: rgba(190, 24, 93, 0.13);
+                --rc-text: #f9a8d4;
+              "
+              onclick="window.rcSelectType('mapa')"
+            >
+              <span class="rc-emoji">🧠</span>
+              <div class="rc-label">Organizador Gráfico</div>
+              <div class="rc-desc">
+                Mapa conceptual, esquema o red semántica guiada
+              </div>
+              <div class="rc-badges">
+                <span class="rc-badge">MET</span
+                ><span class="rc-badge">RA</span>
+              </div>
+              <div class="rc-bloom">Bloom: Comprender · Crear</div>
+            </div>
+          </div>
+          <!-- /resource-type-grid-v2 -->
+
+          <!-- ── Formulario contextual ── -->
+          <div class="card" style="margin-bottom: 16px">
+            <!-- Fila 1: Facultad + Escuela -->
+            <div class="form-row-2" style="margin-bottom: 12px">
+              <div class="field-group">
+                <label class="field-label">Facultad</label>
+                <select
+                  class="field-select"
+                  id="rc-facultad"
+                  onchange="window.rcOnFacultad()"
+                >
+                  <option value="">— Selecciona facultad —</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label class="field-label">Escuela / Programa</label>
+                <select
+                  class="field-select"
+                  id="rc-escuela"
+                  onchange="window.rcOnEscuela()"
+                  disabled
+                >
+                  <option value="">— Primero elige facultad —</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Fila 2: Curso + Ciclo + Semana -->
+            <div class="form-row-3" style="margin-bottom: 12px">
+              <div class="field-group">
+                <label class="field-label">Curso / Asignatura</label>
+                <select
+                  class="field-select"
+                  id="rc-curso"
+                  onchange="window.rcOnCurso()"
+                  disabled
+                >
+                  <option value="">— Elige escuela primero —</option>
+                </select>
+                <input
+                  class="field-input"
+                  id="rc-curso-custom"
+                  placeholder="Escribe el nombre del curso..."
+                  style="margin-top: 6px; display: none"
+                  oninput="window.rcUpdatePromptPreview()"
+                />
+              </div>
+              <div class="field-group">
+                <label class="field-label">Ciclo académico</label>
+                <select
+                  class="field-select"
+                  id="rc-ciclo"
+                  onchange="window.rcUpdatePromptPreview()"
+                >
+                  <option value="">— Ciclo —</option>
+                  <option>I</option>
+                  <option>II</option>
+                  <option>III</option>
+                  <option>IV</option>
+                  <option>V</option>
+                  <option>VI</option>
+                  <option>VII</option>
+                  <option>VIII</option>
+                  <option>IX</option>
+                  <option>X</option>
+                  <option value="Posgrado">Posgrado</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label class="field-label">Semana / Unidad</label>
+                <input
+                  class="field-input"
+                  id="rc-semana"
+                  placeholder="Ej: Semana 5 · Unidad II"
+                  oninput="window.rcUpdatePromptPreview()"
+                />
+              </div>
+            </div>
+
+            <!-- Fila 3: Resultado + Bloom -->
+            <div class="form-row-2" style="margin-bottom: 12px">
+              <div class="field-group">
+                <label class="field-label"
+                  >Resultado de aprendizaje esperado
+                  <span style="color: #f87171">*</span></label
+                >
+                <input
+                  class="field-input"
+                  id="rc-outcome"
+                  placeholder="Ej: Aplica el diseño cuasi-experimental en contextos de salud comunitaria"
+                  oninput="window.rcUpdatePromptPreview()"
+                />
+              </div>
+              <div class="field-group">
+                <label class="field-label">Nivel Bloom</label>
+                <select
+                  class="field-select"
+                  id="rc-bloom"
+                  onchange="window.rcUpdatePromptPreview()"
+                >
+                  <option value="">— Nivel cognitivo —</option>
+                  <option value="Recordar">
+                    🔵 Recordar — identifica, describe
+                  </option>
+                  <option value="Comprender">
+                    🟢 Comprender — explica, clasifica
+                  </option>
+                  <option value="Aplicar">
+                    🟡 Aplicar — resuelve, utiliza
+                  </option>
+                  <option value="Analizar">
+                    🟠 Analizar — compara, organiza
+                  </option>
+                  <option value="Evaluar">
+                    🔴 Evaluar — valora, argumenta
+                  </option>
+                  <option value="Crear">🟣 Crear — diseña, elabora</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Contexto adicional (colapsible) -->
+            <div>
+              <button
+                type="button"
+                class="prompt-preview-toggle"
+                id="ctx-toggle"
+                onclick="window.rcToggleCtx()"
+              >
+                <span class="ppt-arrow">▶</span>
+                Contexto adicional (opcional)
+              </button>
+              <textarea
+                class="field-textarea"
+                id="rc-context"
+                style="min-height: 65px; display: none"
+                placeholder="Sede (Lima/Juliaca/Tarapoto), perfil del grupo, materiales disponibles, modalidad..."
+                oninput="window.rcUpdatePromptPreview()"
+              ></textarea>
+            </div>
+
+            <!-- Preview del prompt -->
+            <div style="margin-top: 10px">
+              <button
+                type="button"
+                class="prompt-preview-toggle"
+                id="ppt-toggle"
+                onclick="window.rcTogglePromptPreview()"
+              >
+                <span class="ppt-arrow">▶</span>
+                Ver prompt completo que se enviará a JoMelAi
+              </button>
+              <div class="prompt-preview-box" id="rc-prompt-preview">
+                Completa el formulario para previsualizar el prompt...
+              </div>
+            </div>
+
+            <!-- Botón generar -->
+            <button
+              class="btn btn-primary"
+              onclick="window.generateResourceV2()"
+              id="btn-gen-resource"
+              style="
+                width: 100%;
+                margin-top: 16px;
+                background: linear-gradient(135deg, #c0192a, #7c3aed);
+              "
+            >
+              🤖 Generar recurso con JoMelAi
+            </button>
+          </div>
+          <!-- /card -->
+
+          <!-- Panel de resultado -->
+          <div id="rc-result-panel" class="resource-result-v2">
+            <div class="syllabus-result">
+              <div class="resource-result-header">
+                <div class="resource-result-title-group">
+                  <h3 class="resource-result-title" id="rc-result-title">
+                    ✅ Recurso generado
+                  </h3>
+                  <div class="resource-result-meta" id="rc-result-meta"></div>
+                </div>
+                <div class="resource-result-actions">
+                  <button
+                    class="btn-result-action"
+                    onclick="window.rcCopyResult()"
+                  >
+                    📋 Copiar
+                  </button>
+                  <button
+                    class="btn-result-action"
+                    onclick="window.rcDownloadResult()"
+                  >
+                    ⬇ Descargar
+                  </button>
+                </div>
+              </div>
+              <div class="resource-markdown" id="rc-result-content"></div>
+            </div>
+          </div>
+
+          <!-- Sugerencias rápidas (compatible con initQuickPrompts) -->
+          <hr class="divider" />
+          <div
+            style="
+              font-size: 11px;
+              font-weight: 700;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              color: var(--text-muted);
+              margin-bottom: 10px;
+            "
+          >
+            Consultas rápidas a JoMelAi
+          </div>
+          <div
+            style="display: flex; flex-wrap: wrap; gap: 8px"
+            id="quick-prompts"
+          ></div>
+        </section>
+        <!-- ══ FIN page-recursos ══ -->
+        <!-- ══ FIN page-recursos ══ -->
+
+        <!-- ═══════ ACCESO TÉCNICO / DATA ENGINE MIGRADO ═══════ -->
+        <section class="page" id="page-tecnico">
+          <div class="page-header">
+            <div
+              class="page-tag"
+              style="
+                --tag-bg: rgba(34, 81, 197, 0.12);
+                --tag-border: #bfdbfe;
+                --tag-color: #1d4ed8;
+              "
+            >
+              ⚙️ Data Engine · DuckDB · RAG · Rutas migradas
+            </div>
+            <h2>Acceso técnico curricular</h2>
+            <p>
+              Restaurado desde la versión anterior: setup, carga de archivos,
+              DuckDB, SQL natural, RAG, gráficos, reportes y jobs.
+            </p>
+          </div>
+
+          <div class="tech-route-tabs" id="tech-route-tabs">
+            <button
+              class="tech-route-tab active"
+              data-tech-route="setup"
+              onclick="techShowRoute('setup')"
+            >
+              ⚙️ Setup
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="import"
+              onclick="techShowRoute('import')"
+            >
+              ⬆️ Importar
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="duckdb"
+              onclick="techShowRoute('duckdb')"
+            >
+              🦆 DuckDB
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="sql"
+              onclick="techShowRoute('sql')"
+            >
+              🧾 SQL natural
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="rag"
+              onclick="techShowRoute('rag')"
+            >
+              🧠 RAG
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="ragask"
+              onclick="techShowRoute('ragask')"
+            >
+              🔎 Asistente RAG
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="charts"
+              onclick="techShowRoute('charts')"
+            >
+              📊 Gráficos
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="reports"
+              onclick="techShowRoute('reports')"
+            >
+              📋 Reportes
+            </button>
+            <button
+              class="tech-route-tab"
+              data-tech-route="jobs"
+              onclick="techShowRoute('jobs')"
+            >
+              ⏱️ Jobs
+            </button>
+          </div>
+
+          <div class="card" style="margin-bottom: 18px; background: #fff">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: flex-start;
+                flex-wrap: wrap;
+              "
+            >
+              <div>
+                <h3 style="margin: 0 0 6px; color: var(--ink)">
+                  Estado operativo
+                </h3>
+                <p style="margin: 0; color: var(--ink-2); font-size: 13px">
+                  Usa compatibilidad automática: intenta primero rutas antiguas
+                  <code>/api/engine/*</code> y, si no existen, usa rutas nuevas
+                  <code>/api/setup/*</code>, <code>/duckdb/*</code> o
+                  <code>/api/rag/*</code>.
+                </p>
+              </div>
+              <div class="tech-actions" style="margin-top: 0">
+                <button class="btn btn-blue" onclick="techRefreshAll()">
+                  🔄 Actualizar todo
+                </button>
+                <button class="btn btn-red" onclick="techCancelAllJobsCompat()">
+                  ⛔ Cancelar jobs
+                </button>
+              </div>
+            </div>
+            <div
+              id="tech-global-status"
+              class="tech-grid three"
+              style="margin-top: 14px"
+            ></div>
+          </div>
+
+          <section class="tech-route active" id="tech-route-setup">
+            <div class="tech-grid two">
+              <div class="card" style="background: #fff">
+                <h3>1) CSV y perfilado</h3>
+                <p class="tech-mini">
+                  Sube CSV al volumen compartido o perfila un archivo existente
+                  en <code>/data/syllabi</code>.
+                </p>
+                <div class="field-group">
+                  <label class="field-label">Archivo CSV</label
+                  ><input
+                    class="field-input"
+                    type="file"
+                    id="setupCsvFile"
+                    accept=".csv,.tsv,.txt,text/csv"
+                  />
+                </div>
+                <div class="tech-actions">
+                  <button
+                    class="btn btn-purple"
+                    onclick="setupUploadCsvCompat()"
+                  >
+                    ⬆️ Subir CSV
+                  </button>
+                  <button
+                    class="btn btn-ghost"
+                    onclick="setupListCsvFilesCompat()"
+                  >
+                    📁 Detectar CSVs
+                  </button>
+                </div>
+                <div class="field-group" style="margin-top: 12px">
+                  <label class="field-label">Ruta dentro de Docker</label
+                  ><input
+                    class="field-input"
+                    id="setupPath"
+                    value="/data/syllabi/silabos.csv"
+                  />
+                </div>
+                <div class="tech-grid three">
+                  <div>
+                    <label class="field-label">Muestra</label
+                    ><input
+                      class="field-input"
+                      id="setupProfileRows"
+                      type="number"
+                      value="5000"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Delimitador</label
+                    ><input
+                      class="field-input"
+                      id="setupProfileDelimiter"
+                      placeholder="auto, ;, ,, tab"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Encoding</label
+                    ><input
+                      class="field-input"
+                      id="setupProfileEncoding"
+                      placeholder="auto, utf-8, latin-1"
+                    />
+                  </div>
+                </div>
+                <button
+                  class="btn btn-blue"
+                  onclick="setupProfileCsvCompat()"
+                  style="margin-top: 10px"
+                >
+                  🧪 Perfilar CSV
+                </button>
+                <pre id="setupProfileBox" class="tech-output"></pre>
+              </div>
+
+              <div class="card" style="background: #fff">
+                <h3>2) DuckDB y RAG</h3>
+                <div class="tech-grid two">
+                  <div>
+                    <label class="field-label">Tabla DuckDB</label
+                    ><input
+                      class="field-input"
+                      id="setupTable"
+                      value="silabos"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Sample size</label
+                    ><input
+                      class="field-input"
+                      id="setupSample"
+                      type="number"
+                      value="20000"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Delimitador</label
+                    ><input
+                      class="field-input"
+                      id="setupImportDelimiter"
+                      placeholder="auto, ;, ,, tab"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Encoding</label
+                    ><input
+                      class="field-input"
+                      id="setupEncoding"
+                      placeholder="auto, utf-8, latin-1"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Saltar líneas</label
+                    ><input
+                      class="field-input"
+                      id="setupSkipRows"
+                      type="number"
+                      value="0"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Límite RAG muestra</label
+                    ><input
+                      class="field-input"
+                      id="setupRagLimit"
+                      type="number"
+                      value="2000"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Batch embeddings</label
+                    ><input
+                      class="field-input"
+                      id="setupRagBatch"
+                      type="number"
+                      value="16"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Colección</label
+                    ><input
+                      class="field-input"
+                      id="setupCollection"
+                      value="silabos"
+                    />
+                  </div>
+                </div>
+                <div class="tech-actions">
+                  <button class="btn btn-blue" onclick="setupDuckJobCompat()">
+                    🦆 Convertir a DuckDB
+                  </button>
+                  <button
+                    class="btn btn-purple"
+                    onclick="setupRagJobCompat(false)"
+                  >
+                    🧠 RAG muestra
+                  </button>
+                  <button
+                    class="btn btn-purple"
+                    onclick="setupRagCollectionsJobCompat(false)"
+                  >
+                    🧩 RAG colecciones muestra
+                  </button>
+                  <button
+                    class="btn btn-red"
+                    onclick="setupRagCollectionsJobCompat(true)"
+                  >
+                    🧩 RAG colecciones completo
+                  </button>
+                  <button class="btn btn-red" onclick="setupRagJobCompat(true)">
+                    🧠 RAG completo
+                  </button>
+                </div>
+                <pre id="setupActionOutput" class="tech-output"></pre>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top: 16px; background: #fff">
+              <h3>3) Prueba rápida de gráfico natural</h3>
+              <textarea class="field-textarea" id="setupChartQuestion" rows="3">
+Genera un gráfico de barras con la cantidad de sílabos por programa.</textarea
+              >
+              <button
+                class="btn btn-blue"
+                onclick="setupTestChartCompat()"
+                style="margin-top: 8px"
+              >
+                📊 Generar gráfico de prueba
+              </button>
+              <div id="setupChartOutput" class="tech-output"></div>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-import">
+            <div class="tech-grid two">
+              <div class="card" style="background: #fff">
+                <h3>Importar CSV / TSV / TXT</h3>
+                <div
+                  class="tech-drop"
+                  onclick="document.getElementById('csvFile').click()"
+                >
+                  📊 Selecciona o arrastra un CSV grande<br /><span
+                    class="tech-mini"
+                    >Se guarda en volumen y puede importarse a SQLite/FTS o
+                    DuckDB</span
+                  >
+                </div>
+                <input
+                  type="file"
+                  id="csvFile"
+                  accept=".csv,.tsv,.txt,text/csv"
+                  style="display: none"
+                />
+                <div class="tech-grid two" style="margin-top: 12px">
+                  <div>
+                    <label class="field-label">Ruta CSV contenedor</label
+                    ><input
+                      class="field-input"
+                      id="csvPath"
+                      value="/data/syllabi/silabos.csv"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Delimitador</label
+                    ><input class="field-input" id="delimiter" value="," />
+                  </div>
+                  <div>
+                    <label class="field-label">Chunk size</label
+                    ><input
+                      class="field-input"
+                      id="chunkSize"
+                      type="number"
+                      value="1000"
+                    />
+                  </div>
+                  <label
+                    class="field-label"
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      margin-top: 28px;
+                    "
+                    ><input id="replaceData" type="checkbox" checked />
+                    Reemplazar índice SQLite</label
+                  >
+                </div>
+                <div class="tech-actions">
+                  <button class="btn btn-ghost" onclick="sampleImportCompat()">
+                    📋 Importar demo
+                  </button>
+                  <button class="btn btn-purple" onclick="uploadCsvCompat()">
+                    ⬆ Guardar CSV subido
+                  </button>
+                  <button class="btn btn-blue" onclick="importCsvCompat()">
+                    📥 Importar a SQLite
+                  </button>
+                </div>
+                <pre id="uploadResult" class="tech-output"></pre>
+              </div>
+
+              <div class="card" style="background: #fff">
+                <h3>PDF / Excel / normativas</h3>
+                <div class="field-group">
+                  <label class="field-label">PDF</label
+                  ><input
+                    class="field-input"
+                    type="file"
+                    id="pdfFile"
+                    accept=".pdf"
+                  />
+                </div>
+                <div class="tech-grid two">
+                  <div>
+                    <label class="field-label">Categoría</label
+                    ><input
+                      class="field-input"
+                      id="pdfCategory"
+                      value="normativa"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Descripción</label
+                    ><input
+                      class="field-input"
+                      id="pdfDescripcion"
+                      placeholder="Documento curricular"
+                    />
+                  </div>
+                </div>
+                <button
+                  class="btn btn-purple"
+                  onclick="uploadPdfCompat()"
+                  style="margin-top: 8px"
+                >
+                  📥 Procesar PDF
+                </button>
+                <hr class="divider" />
+                <div class="field-group">
+                  <label class="field-label">Excel</label
+                  ><input
+                    class="field-input"
+                    type="file"
+                    id="xlsxFile"
+                    accept=".xlsx,.xls"
+                  />
+                </div>
+                <div class="tech-grid two">
+                  <div>
+                    <label class="field-label">Hoja</label
+                    ><input class="field-input" id="xlsxSheet" value="0" />
+                  </div>
+                  <div>
+                    <label class="field-label">Tabla destino</label
+                    ><input
+                      class="field-input"
+                      id="xlsxTable"
+                      value="silabos"
+                    />
+                  </div>
+                </div>
+                <button
+                  class="btn btn-blue"
+                  onclick="uploadExcelCompat()"
+                  style="margin-top: 8px"
+                >
+                  📗 Procesar Excel
+                </button>
+                <pre id="docImportResult" class="tech-output"></pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-duckdb">
+            <div class="card" style="background: #fff">
+              <h3>DuckDB SQL</h3>
+              <div class="tech-grid three">
+                <div>
+                  <label class="field-label">Ruta CSV</label
+                  ><input
+                    class="field-input"
+                    id="duckPath"
+                    value="/data/syllabi/silabos.csv"
+                  />
+                </div>
+                <div>
+                  <label class="field-label">Tabla</label
+                  ><input class="field-input" id="duckTable" value="silabos" />
+                </div>
+                <div>
+                  <label class="field-label">Sample</label
+                  ><input
+                    class="field-input"
+                    id="duckSample"
+                    type="number"
+                    value="20000"
+                  />
+                </div>
+                <div>
+                  <label class="field-label">Delimitador</label
+                  ><input
+                    class="field-input"
+                    id="duckDelimiter"
+                    placeholder="auto, ;, ,, tab"
+                  />
+                </div>
+                <label
+                  class="field-label"
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin-top: 28px;
+                  "
+                  ><input id="duckReplace" type="checkbox" checked /> Reemplazar
+                  tabla</label
+                >
+              </div>
+              <div class="tech-actions">
+                <button class="btn btn-blue" onclick="duckImportCompat(false)">
+                  🦆 Importar ahora
+                </button>
+                <button class="btn btn-ghost" onclick="duckSchemaCompat()">
+                  📐 Ver esquema
+                </button>
+                <button class="btn btn-ghost" onclick="duckPreviewCompat()">
+                  👁️ Preview
+                </button>
+                <button class="btn btn-ghost" onclick="duckTablesCompat()">
+                  📚 Tablas
+                </button>
+              </div>
+              <label class="field-label" style="margin-top: 12px"
+                >SQL manual</label
+              >
+              <textarea class="field-textarea" id="sqlManual" rows="4">
+SELECT * FROM silabos LIMIT 10</textarea
+              >
+              <div class="tech-actions">
+                <input
+                  class="field-input"
+                  style="width: 140px"
+                  id="sqlLimit"
+                  type="number"
+                  value="100"
+                /><button class="btn btn-purple" onclick="duckQueryCompat()">
+                  ▶ Ejecutar SQL
+                </button>
+              </div>
+              <div id="sqlResults" class="tech-output"></div>
+              <pre id="duckOutput" class="tech-output"></pre>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-sql">
+            <div class="card" style="background: #fff">
+              <h3>Pregunta en lenguaje natural → SQL DuckDB</h3>
+              <div class="tech-grid three">
+                <div>
+                  <label class="field-label">Modelo</label
+                  ><input
+                    class="field-input"
+                    id="natModel"
+                    value="qwen2.5:0.5b"
+                  />
+                </div>
+                <div>
+                  <label class="field-label">Tabla</label
+                  ><input class="field-input" id="natTable" value="silabos" />
+                </div>
+                <div>
+                  <label class="field-label">Límite</label
+                  ><input
+                    class="field-input"
+                    id="natLimit"
+                    type="number"
+                    value="100"
+                  />
+                </div>
+              </div>
+              <textarea class="field-textarea" id="natQuestion" rows="4">
+Cuántos cursos hay por facultad</textarea
+              >
+              <button
+                class="btn btn-blue"
+                onclick="naturalSqlCompat()"
+                style="margin-top: 8px"
+              >
+                🧾 Generar y ejecutar SQL
+              </button>
+              <div id="natOutput" class="tech-output"></div>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-rag">
+            <div class="tech-grid two">
+              <div class="card" style="background: #fff">
+                <h3>Construir índice RAG</h3>
+                <div class="tech-grid two">
+                  <div>
+                    <label class="field-label">Ruta CSV</label
+                    ><input
+                      class="field-input"
+                      id="ragPath"
+                      value="/data/syllabi/silabos.csv"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Colección</label
+                    ><input
+                      class="field-input"
+                      id="ragCollection"
+                      value="silabos"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Delimitador</label
+                    ><input
+                      class="field-input"
+                      id="ragDelimiter"
+                      placeholder="auto"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Filas por chunk</label
+                    ><input
+                      class="field-input"
+                      id="ragChunk"
+                      type="number"
+                      value="1000"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Límite filas</label
+                    ><input
+                      class="field-input"
+                      id="ragRowLimit"
+                      type="number"
+                      value="200"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Batch embeddings</label
+                    ><input
+                      class="field-input"
+                      id="ragEmbedBatch"
+                      type="number"
+                      value="16"
+                    />
+                  </div>
+                </div>
+                <label class="field-label">Columnas de texto</label
+                ><textarea
+                  class="field-textarea"
+                  id="ragTextColumns"
+                  rows="2"
+                  placeholder="curso, competencia, sumilla, contenidos, evaluacion, bibliografia"
+                ></textarea>
+                <label class="field-label">Columnas metadata</label
+                ><textarea
+                  class="field-textarea"
+                  id="ragMetadataColumns"
+                  rows="2"
+                  placeholder="codigo, curso, programa, facultad, ciclo, periodo"
+                ></textarea>
+                <label
+                  class="field-label"
+                  style="display: flex; align-items: center; gap: 8px"
+                  ><input id="ragReset" type="checkbox" /> Reiniciar colección
+                  antes de indexar</label
+                >
+                <button
+                  class="btn btn-purple"
+                  onclick="ragBuildCompat()"
+                  style="margin-top: 8px"
+                >
+                  🧠 Construir índice RAG
+                </button>
+                <pre id="ragOutput" class="tech-output"></pre>
+              </div>
+              <div class="card" style="background: #fff">
+                <h3>Buscar fragmentos</h3>
+                <textarea class="field-textarea" id="ragSearchQ" rows="5">
+competencias de ética, responsabilidad social y formación integral en ingeniería</textarea
+                >
+                <button
+                  class="btn btn-blue"
+                  onclick="ragSearchCompat()"
+                  style="margin-top: 8px"
+                >
+                  🔍 Buscar fragmentos
+                </button>
+                <div id="ragResults" class="tech-output"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-ragask">
+            <div class="card" style="background: #fff">
+              <h3>Asistente RAG</h3>
+              <div class="tech-grid three">
+                <div>
+                  <label class="field-label">Modelo</label
+                  ><input
+                    class="field-input"
+                    id="ragAnswerModel"
+                    value="qwen2.5:0.5b"
+                  />
+                </div>
+                <div>
+                  <label class="field-label">Colección</label
+                  ><input
+                    class="field-input"
+                    id="ragAnswerCollection"
+                    value="silabos"
+                  />
+                </div>
+                <div>
+                  <label class="field-label">Fragmentos</label
+                  ><input
+                    class="field-input"
+                    id="ragAnswerN"
+                    type="number"
+                    value="5"
+                  />
+                </div>
+              </div>
+              <textarea class="field-textarea" id="ragQuestion" rows="7">
+Diseña una propuesta preliminar para actualizar el sílabo de Programación I, alineando resultados de aprendizaje, evidencias, actividades y una integración fe-aprendizaje prudente para una universidad adventista.</textarea
+              >
+              <button
+                class="btn btn-purple"
+                onclick="ragAnswerCompat()"
+                style="margin-top: 8px"
+              >
+                🔎 Responder con RAG
+              </button>
+              <div id="ragAnswerOutput" class="tech-output"></div>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-charts">
+            <div class="tech-grid two">
+              <div class="card" style="background: #fff">
+                <h3>Gráfico desde SQL</h3>
+                <div class="tech-grid two">
+                  <div>
+                    <label class="field-label">Tipo</label
+                    ><select class="field-input" id="chartType">
+                      <option value="bar">Barras</option>
+                      <option value="horizontal_bar">
+                        Barras horizontales
+                      </option>
+                      <option value="line">Línea</option>
+                      <option value="pie">Pastel</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label">Título</label
+                    ><input
+                      class="field-input"
+                      id="chartTitle"
+                      value="Sílabos por programa"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">X</label
+                    ><input
+                      class="field-input"
+                      id="chartX"
+                      placeholder="programa"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Y</label
+                    ><input
+                      class="field-input"
+                      id="chartY"
+                      placeholder="total"
+                    />
+                  </div>
+                </div>
+                <textarea class="field-textarea" id="chartSql" rows="4">
+SELECT programa, COUNT(*) AS total FROM silabos GROUP BY programa ORDER BY total DESC LIMIT 20</textarea
+                >
+                <button
+                  class="btn btn-blue"
+                  onclick="chartSqlCompat()"
+                  style="margin-top: 8px"
+                >
+                  📊 Generar gráfico
+                </button>
+                <div id="chartOutput" class="tech-output"></div>
+              </div>
+              <div class="card" style="background: #fff">
+                <h3>Gráfico desde pregunta natural</h3>
+                <div class="tech-grid two">
+                  <div>
+                    <label class="field-label">Modelo</label
+                    ><input
+                      class="field-input"
+                      id="chartModel"
+                      value="qwen2.5:0.5b"
+                    />
+                  </div>
+                  <div>
+                    <label class="field-label">Tabla</label
+                    ><input
+                      class="field-input"
+                      id="chartTable"
+                      value="silabos"
+                    />
+                  </div>
+                </div>
+                <textarea class="field-textarea" id="chartQuestion" rows="4">
+Genera un gráfico de barras con la cantidad de sílabos por facultad.</textarea
+                >
+                <button
+                  class="btn btn-purple"
+                  onclick="naturalChartCompat()"
+                  style="margin-top: 8px"
+                >
+                  📈 Generar desde pregunta
+                </button>
+                <div id="naturalChartOutput" class="tech-output"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-reports">
+            <div class="tech-grid two">
+              <div class="card" style="background: #fff">
+                <h3>Reporte curricular automático</h3>
+                <button class="btn btn-blue" onclick="reportSummaryCompat()">
+                  📋 Generar reporte resumen
+                </button>
+                <div id="reportOutput" class="tech-output"></div>
+              </div>
+              <div class="card" style="background: #fff">
+                <h3>Script Python para análisis</h3>
+                <label class="field-label">Ruta CSV</label
+                ><input
+                  class="field-input"
+                  id="pyCsvPath"
+                  value="/data/syllabi/silabos.csv"
+                />
+                <label class="field-label">Objetivo</label
+                ><textarea class="field-textarea" id="pyGoal" rows="5">
+Generar gráficos de barras por programa, distribución de créditos, porcentaje de sílabos con competencia declarada y alertas de campos incompletos.</textarea
+                >
+                <label class="field-label">Modelo</label
+                ><input
+                  class="field-input"
+                  id="pyModel"
+                  value="qwen2.5:0.5b"
+                />
+                <button
+                  class="btn btn-purple"
+                  onclick="pythonScriptCompat()"
+                  style="margin-top: 8px"
+                >
+                  🐍 Generar script
+                </button>
+                <div id="pythonOutput" class="tech-output"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="tech-route" id="tech-route-jobs">
+            <div class="card" style="background: #fff">
+              <h3>Jobs activos / recientes</h3>
+              <div class="tech-actions">
+                <button class="btn btn-blue" onclick="techLoadJobsCompat()">
+                  🔄 Actualizar jobs</button
+                ><button
+                  class="btn btn-red"
+                  onclick="techCancelAllJobsCompat()"
+                >
+                  ⛔ Cancelar todos
+                </button>
+              </div>
+              <div id="tech-jobs" class="tech-output"></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <!-- AI PANEL (floating assistant) -->
+    <div class="ai-panel" id="ai-panel">
+      <div class="ai-panel-header">
+        <div class="ai-panel-title">
+          <div
+            style="
+              width: 32px;
+              height: 32px;
+              border-radius: 8px;
+              background: linear-gradient(135deg, #2251c5, #7c3aed);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-family: &quot;Exo 2&quot;, sans-serif;
+              font-weight: 900;
+              font-size: 12px;
+            "
+          >
+            JM
+          </div>
+          Asistente JoMelAi
+        </div>
+        <button class="ai-panel-close" onclick="window.toggleAiPanel()">
+          ✕
+        </button>
+      </div>
+      <div class="ai-panel-body" id="ai-panel-body">
+        <div class="ai-msg">
+          <div class="ai-msg-bot">
+            ¡Hola! Soy JoMelAi, tu asistente curricular. Puedo ayudarte a
+            diseñar mallas, planes de estudios, sílabos y recursos de
+            aprendizaje. ¿En qué empezamos? 🎓
+          </div>
+        </div>
+      </div>
+      <div class="ai-panel-footer">
+        <input
+          type="text"
+          id="ai-panel-input"
+          placeholder="Escribe tu consulta..."
+          onkeydown="if (event.key === 'Enter') sendAiMessage();"
+        />
+        <button class="ai-send" onclick="window.sendAiMessage()">➤</button>
+      </div>
+    </div>
+
+    <!-- FAB -->
+    <button
+      class="fab"
+      id="fab"
+      onclick="window.toggleAiPanel()"
+      title="Abrir JoMelAi"
+    >
+      JM
+    </button>
+
+    <script src="/app.js"></script>
+    <script src="/tech-routes.js"></script>
+    <script src="/jomelai-syllabus-pretty-v7-live.js?v=1780941736"></script>
+  <script src="/chat-lateral-v2-client.js?v=20260608fix"></script>
+  <script src="/chat-panel-renderer-final.js?v=20260608fix"></script>
+</body>
+</html>

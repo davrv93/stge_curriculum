@@ -4,6 +4,9 @@ data/backend/storage/sessions/*
 node_modules/
 vendor/
 
+# Ignorar todas las sesiones del backend
+data/backend/storage/sessions/*
+!data/backend/storage/sessions/.gitkeep
 # Builds/cache
 dist/
 build/

@@ -808,7 +808,7 @@ echo "=================================================="
 echo "Backup: $BACKUP_DIR"
 echo
 echo "Open:"
-echo "  http://18.191.127.254:3000"
+echo "  http://3.143.242.233:3000"
 echo
 echo "Hard refresh:"
 echo "  Ctrl + Shift + R"

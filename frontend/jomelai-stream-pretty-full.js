@@ -1,6 +1,6 @@
 /* JOMELAI_STREAM_PRETTY_CONTINGENCY_V1 */
 (function () {
-  const MODEL = 'qwen2.5:0.5b';
+  const MODEL = 'llama3.2:1b';
 
   const S = window.JM_STREAM_PRETTY = window.JM_STREAM_PRETTY || {
     chat: {},

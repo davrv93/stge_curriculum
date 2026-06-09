@@ -116,7 +116,7 @@ echo "=================================================="
 echo " LISTO"
 echo "=================================================="
 echo "Abre:"
-echo "  http://18.191.127.254:3000"
+echo "  http://3.143.242.233:3000"
 echo
 echo "Luego hard refresh:"
 echo "  Ctrl + Shift + R"

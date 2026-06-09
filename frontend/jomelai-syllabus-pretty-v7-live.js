@@ -5,7 +5,7 @@
    - Mantiene hoja centrada, editable y botón Continuar generación.
 */
 (function () {
-  const MODEL = 'qwen2.5:0.5b';
+  const MODEL = 'llama3.2:1b';
 
   const STATE = window.JM_SYLLABUS_PRETTY_V7 = window.JM_SYLLABUS_PRETTY_V7 || {
     raw: '',

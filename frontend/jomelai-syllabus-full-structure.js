@@ -1,6 +1,6 @@
 /* JOMELAI_SYLLABUS_FULL_STRUCTURE_V1 */
 (function () {
-  const MODEL = 'qwen2.5:0.5b';
+  const MODEL = 'llama3.2:1b';
 
   function id(x) { return document.getElementById(x); }
 

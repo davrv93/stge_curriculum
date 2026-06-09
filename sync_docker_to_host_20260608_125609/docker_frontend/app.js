@@ -2799,7 +2799,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 /* JOMELAI_APP_STREAM_PRETTY_FULL_V1_START */
 (function () {
-  const JM_MODEL = 'qwen2.5-coder:3b';
+  const JM_MODEL = 'llama3.2:1b';
 
   const JM = window.JM_STREAM_PRETTY = window.JM_STREAM_PRETTY || {
     chat: {},

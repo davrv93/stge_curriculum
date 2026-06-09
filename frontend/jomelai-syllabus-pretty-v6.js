@@ -1,6 +1,6 @@
 /* JOMELAI_SYLLABUS_PRETTY_V6_LAYOUT_FIX */
 (function () {
-  const MODEL = 'qwen2.5:0.5b';
+  const MODEL = 'llama3.2:1b';
 
   const STATE = window.JM_SYLLABUS_PRETTY_V6 = window.JM_SYLLABUS_PRETTY_V6 || {
     raw: '',

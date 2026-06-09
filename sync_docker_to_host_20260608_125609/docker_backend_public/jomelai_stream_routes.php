@@ -114,7 +114,7 @@ function jm_sse_send($event, $data)
     @flush();
 }
 
-function jm_ollama_stream_generate($model, $prompt, $options, $onToken)
+function jm_ollama_stream_generate($model, $prompt, $options, $onToken, $format = null)
 {
     if (!function_exists('curl_init')) {
         throw new RuntimeException('La extension curl de PHP no esta disponible.');
@@ -124,8 +124,13 @@ function jm_ollama_stream_generate($model, $prompt, $options, $onToken)
         'model' => $model,
         'prompt' => $prompt,
         'stream' => true,
+        'keep_alive' => getenv('SYLLABUS_KEEP_ALIVE') ?: '30m',
         'options' => $options,
     ];
+
+    if ($format !== null && $format !== '') {
+        $payload['format'] = $format;
+    }
 
     $base = jm_ollama_base_url();
     $ch = curl_init($base . '/api/generate');
@@ -291,6 +296,513 @@ function jm_handle_ask_stream()
     exit;
 }
 
+
+/* JOMELAI_SYLLABUS_FORMAT_HELPERS_START */
+
+function jm_syllabus_extract_json($text)
+{
+    $text = trim((string)$text);
+
+    if ($text === '') {
+        return null;
+    }
+
+    $decoded = json_decode($text, true);
+    if (is_array($decoded)) {
+        return $decoded;
+    }
+
+    $start = strpos($text, '{');
+    $end = strrpos($text, '}');
+
+    if ($start === false || $end === false || $end <= $start) {
+        return null;
+    }
+
+    $candidate = substr($text, $start, $end - $start + 1);
+    $decoded = json_decode($candidate, true);
+
+    return is_array($decoded) ? $decoded : null;
+}
+
+function jm_syllabus_text($value)
+{
+    if ($value === null) {
+        return '';
+    }
+
+    if (is_array($value)) {
+        return trim(json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    return trim((string)$value);
+}
+
+function jm_syllabus_list($value)
+{
+    if (is_array($value)) {
+        return $value;
+    }
+
+    $value = trim((string)$value);
+    if ($value === '') {
+        return [];
+    }
+
+    return array_values(array_filter(array_map('trim', preg_split('/\n|;|\|/', $value))));
+}
+
+function jm_syllabus_to_markdown($syl, $raw = '')
+{
+    if (!is_array($syl)) {
+        return trim((string)$raw);
+    }
+
+    $dg = isset($syl['datos_generales']) && is_array($syl['datos_generales'])
+        ? $syl['datos_generales']
+        : [];
+
+    $lines = [];
+    $lines[] = '# Sílabo académico';
+    $lines[] = '';
+    $lines[] = '## I. Datos generales';
+    $lines[] = '';
+    $lines[] = '| Campo | Información |';
+    $lines[] = '|---|---|';
+
+    $fields = [
+        'curso' => 'Curso',
+        'programa' => 'Programa',
+        'creditos' => 'Créditos',
+        'ciclo' => 'Ciclo',
+        'semanas' => 'Semanas',
+        'sesiones_por_semana' => 'Sesiones por semana',
+        'modalidad' => 'Modalidad',
+        'fecha_inicio' => 'Fecha de inicio',
+        'fecha_fin' => 'Fecha de fin',
+        'sistema_evaluacion' => 'Sistema de evaluación',
+    ];
+
+    foreach ($fields as $key => $label) {
+        $value = $dg[$key] ?? '';
+        if ($value !== '' && $value !== null) {
+            $lines[] = '| ' . $label . ' | ' . jm_syllabus_text($value) . ' |';
+        }
+    }
+
+    $lines[] = '';
+    $lines[] = '## II. Sumilla';
+    $lines[] = '';
+    $lines[] = jm_syllabus_text($syl['sumilla'] ?? '');
+
+    $lines[] = '';
+    $lines[] = '## III. Competencia del curso';
+    $lines[] = '';
+    $lines[] = jm_syllabus_text($syl['competencia_curso'] ?? '');
+
+    $lines[] = '';
+    $lines[] = '## IV. Resultados de aprendizaje';
+    $lines[] = '';
+
+    foreach (jm_syllabus_list($syl['resultados_curso'] ?? []) as $i => $item) {
+        $lines[] = ($i + 1) . '. ' . jm_syllabus_text($item);
+    }
+
+    $lines[] = '';
+    $lines[] = '## V. Unidades de aprendizaje';
+
+    foreach (jm_syllabus_list($syl['unidades'] ?? []) as $u) {
+        if (!is_array($u)) {
+            continue;
+        }
+
+        $unidad = jm_syllabus_text($u['unidad'] ?? '');
+        $titulo = jm_syllabus_text($u['titulo'] ?? ('Unidad ' . $unidad));
+
+        $lines[] = '';
+        $lines[] = '### Unidad ' . $unidad . ': ' . $titulo;
+        $lines[] = '';
+
+        if (isset($u['semanas'])) {
+            $semanas = is_array($u['semanas']) ? implode(', ', $u['semanas']) : jm_syllabus_text($u['semanas']);
+            $lines[] = '- Semanas: ' . $semanas;
+        }
+
+        if (!empty($u['resultado_unidad'])) {
+            $lines[] = '- Resultado de unidad: ' . jm_syllabus_text($u['resultado_unidad']);
+        }
+
+        $contenidos = jm_syllabus_list($u['contenidos'] ?? []);
+        if ($contenidos) {
+            $lines[] = '- Contenidos:';
+            foreach ($contenidos as $c) {
+                $lines[] = '  - ' . jm_syllabus_text($c);
+            }
+        }
+
+        $sesiones = jm_syllabus_list($u['sesiones'] ?? []);
+        if ($sesiones) {
+            $lines[] = '';
+            $lines[] = '| Semana | Sesión | Título | Actividad | Producto |';
+            $lines[] = '|---:|---:|---|---|---|';
+            foreach ($sesiones as $ses) {
+                if (!is_array($ses)) {
+                    continue;
+                }
+                $lines[] =
+                    '| ' . jm_syllabus_text($ses['semana'] ?? '') .
+                    ' | ' . jm_syllabus_text($ses['sesion'] ?? '') .
+                    ' | ' . jm_syllabus_text($ses['titulo'] ?? '') .
+                    ' | ' . jm_syllabus_text($ses['actividad_aprendizaje'] ?? '') .
+                    ' | ' . jm_syllabus_text($ses['producto'] ?? '') .
+                    ' |';
+            }
+        }
+
+        if (!empty($u['producto_unidad'])) {
+            $lines[] = '';
+            $lines[] = '- Producto de unidad: ' . jm_syllabus_text($u['producto_unidad']);
+        }
+    }
+
+    $lines[] = '';
+    $lines[] = '## VI. Evaluaciones';
+    $lines[] = '';
+    $lines[] = '| Tipo | Descripción | Evidencia | Semana | Puntaje |';
+    $lines[] = '|---|---|---|---:|---:|';
+
+    foreach (jm_syllabus_list($syl['evaluaciones'] ?? []) as $ev) {
+        if (!is_array($ev)) {
+            continue;
+        }
+
+        $lines[] =
+            '| ' . jm_syllabus_text($ev['tipo'] ?? '') .
+            ' | ' . jm_syllabus_text($ev['descripcion'] ?? '') .
+            ' | ' . jm_syllabus_text($ev['evidencia'] ?? '') .
+            ' | ' . jm_syllabus_text($ev['semana'] ?? '') .
+            ' | ' . jm_syllabus_text($ev['puntaje_vigesimal'] ?? '') .
+            ' |';
+    }
+
+    $lines[] = '';
+    $lines[] = '## VII. Metodologías';
+    $lines[] = '';
+
+    foreach (jm_syllabus_list($syl['metodologias'] ?? []) as $m) {
+        $lines[] = '- ' . jm_syllabus_text($m);
+    }
+
+    $lines[] = '';
+    $lines[] = '## VIII. Referencias';
+    $lines[] = '';
+    $lines[] = '| Autor | Año | Título | Fuente | URL/DOI | Utilidad |';
+    $lines[] = '|---|---|---|---|---|---|';
+
+    foreach (jm_syllabus_list($syl['referencias'] ?? []) as $ref) {
+        if (!is_array($ref)) {
+            continue;
+        }
+
+        $lines[] =
+            '| ' . jm_syllabus_text($ref['autor'] ?? '') .
+            ' | ' . jm_syllabus_text($ref['anio'] ?? '') .
+            ' | ' . jm_syllabus_text($ref['titulo'] ?? '') .
+            ' | ' . jm_syllabus_text($ref['fuente'] ?? '') .
+            ' | ' . jm_syllabus_text($ref['url'] ?? '') .
+            ' | ' . jm_syllabus_text($ref['utilidad'] ?? '') .
+            ' |';
+    }
+
+    $lines[] = '';
+    $lines[] = '## IX. Enlaces';
+    $lines[] = '';
+
+    foreach (jm_syllabus_list($syl['enlaces'] ?? []) as $en) {
+        if (is_array($en)) {
+            $lines[] = '- [' . jm_syllabus_text($en['titulo'] ?? 'Recurso') . '](' . jm_syllabus_text($en['url'] ?? '#') . '): ' . jm_syllabus_text($en['uso'] ?? '');
+        }
+    }
+
+    return trim(implode("\n", $lines));
+}
+
+/* JOMELAI_SYLLABUS_FORMAT_HELPERS_END */
+
+
+
+/* JOMELAI_SYLLABUS_MODEL_ENV_HELPERS_START */
+
+function jm_syllabus_read_dotenv_value($key)
+{
+    $key = trim((string)$key);
+
+    if ($key === '') {
+        return null;
+    }
+
+    $dirs = [];
+    $dir = __DIR__;
+
+    for ($i = 0; $i < 8; $i++) {
+        if (!$dir || $dir === '/' || in_array($dir, $dirs, true)) {
+            break;
+        }
+
+        $dirs[] = $dir;
+        $parent = dirname($dir);
+
+        if ($parent === $dir) {
+            break;
+        }
+
+        $dir = $parent;
+    }
+
+    foreach ($dirs as $d) {
+        $file = rtrim($d, '/') . '/.env';
+
+        if (!is_file($file) || !is_readable($file)) {
+            continue;
+        }
+
+        $lines = @file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        if (!is_array($lines)) {
+            continue;
+        }
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+
+            if ($line === '' || strpos($line, '#') === 0) {
+                continue;
+            }
+
+            if (strpos($line, '=') === false) {
+                continue;
+            }
+
+            [$k, $v] = explode('=', $line, 2);
+
+            $k = trim($k);
+            $v = trim($v);
+
+            if ($k !== $key) {
+                continue;
+            }
+
+            $v = trim($v, "\"'");
+
+            return $v;
+        }
+    }
+
+    return null;
+}
+
+function jm_syllabus_env_value($key, $default = '')
+{
+    $key = trim((string)$key);
+
+    if ($key === '') {
+        return $default;
+    }
+
+    $value = getenv($key);
+
+    if ($value !== false && $value !== '') {
+        return $value;
+    }
+
+    if (isset($_ENV[$key]) && $_ENV[$key] !== '') {
+        return $_ENV[$key];
+    }
+
+    if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') {
+        return $_SERVER[$key];
+    }
+
+    if (function_exists('jm_stream_config')) {
+        try {
+            $configKey = strtolower($key);
+            $value = jm_stream_config($configKey, '');
+
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+        } catch (Throwable $e) {
+            // fallback
+        }
+    }
+
+    $value = jm_syllabus_read_dotenv_value($key);
+
+    if ($value !== null && $value !== '') {
+        return $value;
+    }
+
+    return $default;
+}
+
+function jm_syllabus_env_bool($key, $default = false)
+{
+    $raw = strtolower(trim((string)jm_syllabus_env_value($key, $default ? '1' : '0')));
+
+    return in_array($raw, ['1', 'true', 'yes', 'si', 'sí', 'on'], true);
+}
+
+function jm_syllabus_selected_model($requestModel = '')
+{
+    /*
+     * Regla:
+     * - Por defecto manda .env: SYLLABUS_OLLAMA_MODEL
+     * - Si quieres que el frontend pueda sobrescribir modelo:
+     *   SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE=1
+     */
+    $envModel = trim((string)jm_syllabus_env_value('SYLLABUS_OLLAMA_MODEL', 'llama3.2:1b'));
+    $requestModel = trim((string)$requestModel);
+    $allowOverride = jm_syllabus_env_bool('SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE', false);
+
+    if ($allowOverride && $requestModel !== '') {
+        return $requestModel;
+    }
+
+    if ($envModel !== '') {
+        return $envModel;
+    }
+
+    if ($requestModel !== '') {
+        return $requestModel;
+    }
+
+    return 'llama3.2:1b';
+}
+
+/* JOMELAI_SYLLABUS_MODEL_ENV_HELPERS_END */
+
+
+
+/* JOMELAI_SYNC_SYLLABUS_MODEL_START */
+
+function jm_sync_read_dotenv_value($key)
+{
+    $key = trim((string)$key);
+
+    if ($key === '') {
+        return null;
+    }
+
+    $dirs = [];
+    $dir = __DIR__;
+
+    for ($i = 0; $i < 10; $i++) {
+        if (!$dir || $dir === '/' || in_array($dir, $dirs, true)) {
+            break;
+        }
+
+        $dirs[] = $dir;
+        $parent = dirname($dir);
+
+        if ($parent === $dir) {
+            break;
+        }
+
+        $dir = $parent;
+    }
+
+    foreach ($dirs as $d) {
+        $file = rtrim($d, '/') . '/.env';
+
+        if (!is_file($file) || !is_readable($file)) {
+            continue;
+        }
+
+        $lines = @file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        if (!is_array($lines)) {
+            continue;
+        }
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+
+            if ($line === '' || strpos($line, '#') === 0) {
+                continue;
+            }
+
+            if (strpos($line, '=') === false) {
+                continue;
+            }
+
+            [$k, $v] = explode('=', $line, 2);
+
+            $k = trim($k);
+            $v = trim($v);
+
+            if ($k !== $key) {
+                continue;
+            }
+
+            return trim($v, "\"'");
+        }
+    }
+
+    return null;
+}
+
+function jm_sync_env($key, $default = '')
+{
+    $value = getenv($key);
+
+    if ($value !== false && $value !== '') {
+        return $value;
+    }
+
+    if (isset($_ENV[$key]) && $_ENV[$key] !== '') {
+        return $_ENV[$key];
+    }
+
+    if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') {
+        return $_SERVER[$key];
+    }
+
+    $dotenv = jm_sync_read_dotenv_value($key);
+
+    if ($dotenv !== null && $dotenv !== '') {
+        return $dotenv;
+    }
+
+    return $default;
+}
+
+function jm_sync_env_bool($key, $default = false)
+{
+    $raw = strtolower(trim((string)jm_sync_env($key, $default ? '1' : '0')));
+
+    return in_array($raw, ['1', 'true', 'yes', 'si', 'sí', 'on'], true);
+}
+
+function jm_sync_syllabus_model($requestModel = '')
+{
+    $requestModel = trim((string)$requestModel);
+    $envModel = trim((string)jm_sync_env('SYLLABUS_OLLAMA_MODEL', 'llama3.2:1b'));
+    $allowOverride = jm_sync_env_bool('SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE', false);
+
+    if ($allowOverride && $requestModel !== '') {
+        return $requestModel;
+    }
+
+    if ($envModel !== '') {
+        return $envModel;
+    }
+
+    return 'llama3.2:1b';
+}
+
+/* JOMELAI_SYNC_SYLLABUS_MODEL_END */
+
+
 function jm_handle_syllabus_stream()
 {
     if (jm_stream_method() !== 'POST') {
@@ -301,175 +813,122 @@ function jm_handle_syllabus_stream()
 
     $data = jm_stream_read_json();
 
-    $course = trim((string)($data['course'] ?? ''));
+    $course = trim((string)($data['course'] ?? $data['curso'] ?? $data['asignatura'] ?? ''));
 
     if ($course === '') {
         jm_stream_json_response(['ok' => false, 'message' => 'El nombre del curso es obligatorio.'], 422);
     }
 
-    $model = trim((string)($data['model'] ?? jm_stream_config('ollama_default_model', 'qwen2.5-coder:3b')));
-    if ($model === '') {
-        $model = 'qwen2.5-coder:3b';
-    }
+    $requestModel = trim((string)($data['model'] ?? ''));
+    $model = jm_sync_syllabus_model($requestModel);
 
-    $program = trim((string)($data['program'] ?? ''));
-    $credits = trim((string)($data['credits'] ?? ''));
-    $cycle = trim((string)($data['cycle'] ?? ''));
-    $weeks = max(1, min((int)($data['weeks'] ?? 16), 24));
-    $modality = trim((string)($data['modality'] ?? 'Presencial'));
-    $profile = trim((string)($data['graduate_profile'] ?? ''));
-    $competency = trim((string)($data['competency'] ?? ''));
-    $startDate = trim((string)($data['start_date'] ?? ''));
-    $sessionsPerWeek = max(1, min((int)($data['sessions_per_week'] ?? 1), 4));
+    
 
-    $maxTokens = (int)($data['max_tokens'] ?? 2200);
-    $maxTokens = max(1200, min($maxTokens, 2800));
+    $program = trim((string)($data['program'] ?? $data['programa'] ?? $data['programa_estudio'] ?? ''));
+    $credits = trim((string)($data['credits'] ?? $data['creditos'] ?? ''));
+    $cycle = trim((string)($data['cycle'] ?? $data['ciclo'] ?? ''));
+    $weeks = max(4, min((int)($data['weeks'] ?? $data['semanas'] ?? 16), 20));
+    $modality = trim((string)($data['modality'] ?? $data['modalidad'] ?? 'Presencial'));
+    $profile = trim((string)($data['graduate_profile'] ?? $data['perfil_egreso'] ?? ''));
+    $competency = trim((string)($data['competency'] ?? $data['competencia'] ?? ''));
+    $startDate = trim((string)($data['start_date'] ?? $data['fecha_inicio'] ?? ''));
+    $sessionsPerWeek = max(1, min((int)($data['sessions_per_week'] ?? $data['sesiones_por_semana'] ?? 1), 3));
 
-    $numCtx = (int)($data['num_ctx'] ?? 2048);
-    $numCtx = max(1024, min($numCtx, 3072));
+    $maxTokens = (int)($data['max_tokens'] ?? getenv('SYLLABUS_MAX_TOKENS') ?: 1500);
+    $maxTokens = max(900, min($maxTokens, 1900));
 
-    $temperature = (float)($data['temperature'] ?? 0.22);
+    $numCtx = (int)($data['num_ctx'] ?? getenv('SYLLABUS_NUM_CTX') ?: 1536);
+    $numCtx = max(1024, min($numCtx, 2048));
+
+    $temperature = (float)($data['temperature'] ?? getenv('SYLLABUS_TEMPERATURE') ?: 0.18);
+    $temperature = max(0.05, min($temperature, 0.45));
+
+    $topP = (float)($data['top_p'] ?? getenv('SYLLABUS_TOP_P') ?: 0.80);
+    $topP = max(0.50, min($topP, 0.90));
+
+    $includeDates = !empty($startDate);
+    $totalSessions = $weeks * $sessionsPerWeek;
 
     $tokensConfig = [
         'model' => $model,
+        'model_env' => jm_sync_env('SYLLABUS_OLLAMA_MODEL', 'llama3.2:1b'),
+        'request_model' => $requestModel,
+        'request_model_ignored' => !jm_sync_env_bool('SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE', false),
+        'request_model_override' => jm_sync_env_bool('SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE', false),
+        'model_env' => jm_syllabus_env_value('SYLLABUS_OLLAMA_MODEL', 'llama3.2:1b'),
+        'request_model_override' => jm_syllabus_env_bool('SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE', false),
         'num_ctx' => $numCtx,
         'num_predict' => $maxTokens,
         'n_results' => 0,
         'temperature' => $temperature,
-        'top_p' => 0.85,
+        'top_p' => $topP,
         'stream' => true,
+        'format' => 'json',
+        'optimized' => true,
+        'render_mode' => 'syllabus_formatted',
     ];
 
     $prompt =
-        "Eres un disenador curricular universitario experto.\n\n" .
-        "Genera contenido REAL, especifico y util para un silabo universitario.\n" .
-        "Responde SOLO JSON valido. No uses Markdown. No uses placeholders. No uses textos genericos como titulo 1, contenido 1, referencia 1, autor 1 o url 1.\n\n" .
+        "Eres JoMelAI Curriculista, diseñador curricular universitario.\\n" .
+        "Genera contenido dinámico, específico y útil para un sílabo universitario.\\n" .
+        "Responde SOLO JSON válido. No uses markdown. No agregues texto fuera del JSON.\\n" .
+        "No uses placeholders como contenido 1, referencia 1, título real o autor real.\\n" .
+        "Si no conoces URL exacta, usa URL institucional no especificada o DOI no identificado.\\n\\n" .
 
-        "DATOS DEL CURSO:\n" .
-        "ASIGNATURA: {$course}\n" .
-        "PROGRAMA: {$program}\n" .
-        "CREDITOS: {$credits}\n" .
-        "CICLO: {$cycle}\n" .
-        "SEMANAS: {$weeks}\n" .
-        "SESIONES POR SEMANA: {$sessionsPerWeek}\n" .
-        "MODALIDAD: {$modality}\n" .
-        "FECHA DE INICIO SUGERIDA: {$startDate}\n" .
-        "PERFIL DE EGRESO/APORTE: {$profile}\n" .
-        "COMPETENCIA ESPERADA: {$competency}\n\n" .
+        "DATOS:\\n" .
+        "- curso: {$course}\\n" .
+        "- programa: {$program}\\n" .
+        "- creditos: {$credits}\\n" .
+        "- ciclo: {$cycle}\\n" .
+        "- semanas: {$weeks}\\n" .
+        "- sesiones_por_semana: {$sessionsPerWeek}\\n" .
+        "- total_sesiones_maximo: {$totalSessions}\\n" .
+        "- modalidad: {$modality}\\n" .
+        "- fecha_inicio: {$startDate}\\n" .
+        "- perfil_egreso: {$profile}\\n" .
+        "- competencia_esperada: {$competency}\\n\\n" .
 
-        "REGLAS OBLIGATORIAS:\n" .
-        "- Considera exactamente {$weeks} semanas.\n" .
-        "- Divide el curso en 4 unidades academicas equilibradas.\n" .
-        "- Genera sesiones sin sobrepasar el total de semanas ni el numero de sesiones por semana.\n" .
-        "- Propone fecha_inicio y fecha_fin cuando sea posible. Si no hay fecha_inicio, usa fechas sugeridas relativas por semana.\n" .
-        "- Incluye sumilla, competencia del curso, resultados de aprendizaje de la asignatura, unidades, resultado de aprendizaje de cada unidad, sesiones, evaluaciones y referencias.\n" .
-        "- Las evaluaciones deben usar sistema numerico vigesimal de 0 a 20.\n" .
-        "- Incluye evaluacion de producto de unidad, evaluacion de resultados de aprendizaje y evaluacion de competencia.\n" .
-        "- Las referencias deben ser reales o institucionales reconocibles; si no conoces URL exacta, usa \"DOI no identificado\" o \"URL institucional no especificada\".\n\n" .
+        "REGLAS:\\n" .
+        "- Divide el curso en 4 unidades equilibradas.\\n" .
+        "- Genera exactamente 4 resultados_curso.\\n" .
+        "- Cada unidad debe incluir unidad, titulo, semanas, resultado_unidad, contenidos, sesiones, producto_unidad y evaluacion_producto_unidad.\\n" .
+        "- Las sesiones no deben exceder {$totalSessions}.\\n" .
+        "- Genera evaluaciones globales: producto_unidad, resultado_aprendizaje y competencia.\\n" .
+        "- Usa sistema vigesimal 0 a 20.\\n" .
+        "- Genera 5 referencias y 4 enlaces académicos o institucionales.\\n" .
+        "- Mantén textos concretos y no excesivamente largos.\\n" .
+        ($includeDates ? "- Calcula fecha_inicio y fecha_fin aproximadas cuando sea posible.\\n" : "- Si no hay fecha de inicio, usa Semana N como fecha_sugerida.\\n") .
+        "\\n" .
 
-        "DEVUELVE EXACTAMENTE ESTE JSON:\n" .
-        "{\n" .
-        "  \"datos_generales\": {\n" .
-        "    \"curso\": \"{$course}\",\n" .
-        "    \"programa\": \"{$program}\",\n" .
-        "    \"creditos\": \"{$credits}\",\n" .
-        "    \"ciclo\": \"{$cycle}\",\n" .
-        "    \"semanas\": {$weeks},\n" .
-        "    \"sesiones_por_semana\": {$sessionsPerWeek},\n" .
-        "    \"modalidad\": \"{$modality}\",\n" .
-        "    \"fecha_inicio\": \"fecha sugerida\",\n" .
-        "    \"fecha_fin\": \"fecha sugerida\",\n" .
-        "    \"sistema_evaluacion\": \"Sistema numerico vigesimal: 0 a 20\"\n" .
-        "  },\n" .
-        "  \"sumilla\": \"sumilla real de 100 a 140 palabras sobre la asignatura\",\n" .
-        "  \"competencia_curso\": \"competencia observable y especifica de la asignatura\",\n" .
-        "  \"resultados_curso\": [\n" .
-        "    \"resultado de aprendizaje real 1\",\n" .
-        "    \"resultado de aprendizaje real 2\",\n" .
-        "    \"resultado de aprendizaje real 3\",\n" .
-        "    \"resultado de aprendizaje real 4\"\n" .
-        "  ],\n" .
-        "  \"unidades\": [\n" .
-        "    {\n" .
-        "      \"unidad\": 1,\n" .
-        "      \"titulo\": \"titulo real de unidad\",\n" .
-        "      \"semanas\": [1,2,3,4],\n" .
-        "      \"resultado_unidad\": \"resultado de aprendizaje real de la unidad\",\n" .
-        "      \"contenidos\": [\"contenido real 1\", \"contenido real 2\", \"contenido real 3\", \"contenido real 4\"],\n" .
-        "      \"sesiones\": [\n" .
-        "        {\n" .
-        "          \"semana\": 1,\n" .
-        "          \"sesion\": 1,\n" .
-        "          \"titulo\": \"titulo real de sesion\",\n" .
-        "          \"resultado_sesion\": \"resultado observable de la sesion\",\n" .
-        "          \"contenidos\": [\"tema real\", \"tema real\"],\n" .
-        "          \"actividad_aprendizaje\": \"actividad concreta\",\n" .
-        "          \"producto\": \"producto o evidencia\",\n" .
-        "          \"fecha_sugerida\": \"fecha o semana sugerida\"\n" .
-        "        }\n" .
-        "      ],\n" .
-        "      \"producto_unidad\": \"producto integrador real\",\n" .
-        "      \"evaluacion_producto_unidad\": {\n" .
-        "        \"descripcion\": \"evaluacion del producto de unidad\",\n" .
-        "        \"criterios\": [\"criterio real 1\", \"criterio real 2\", \"criterio real 3\"],\n" .
-        "        \"puntaje_vigesimal\": 20,\n" .
-        "        \"fecha_sugerida\": \"semana o fecha\"\n" .
-        "      }\n" .
-        "    }\n" .
-        "  ],\n" .
-        "  \"evaluaciones\": [\n" .
-        "    {\n" .
-        "      \"tipo\": \"producto_unidad\",\n" .
-        "      \"descripcion\": \"evaluacion concreta\",\n" .
-        "      \"evidencia\": \"producto o evidencia evaluable\",\n" .
-        "      \"criterios\": [\"criterio real 1\", \"criterio real 2\"],\n" .
-        "      \"puntaje_vigesimal\": 20,\n" .
-        "      \"semana\": 4,\n" .
-        "      \"fecha_sugerida\": \"fecha o semana\"\n" .
-        "    },\n" .
-        "    {\n" .
-        "      \"tipo\": \"resultado_aprendizaje\",\n" .
-        "      \"descripcion\": \"evaluacion de resultado de aprendizaje\",\n" .
-        "      \"evidencia\": \"evidencia evaluable\",\n" .
-        "      \"criterios\": [\"criterio real 1\", \"criterio real 2\"],\n" .
-        "      \"puntaje_vigesimal\": 20,\n" .
-        "      \"semana\": 8,\n" .
-        "      \"fecha_sugerida\": \"fecha o semana\"\n" .
-        "    },\n" .
-        "    {\n" .
-        "      \"tipo\": \"competencia\",\n" .
-        "      \"descripcion\": \"evaluacion integradora de competencia\",\n" .
-        "      \"evidencia\": \"evidencia integradora\",\n" .
-        "      \"criterios\": [\"criterio real 1\", \"criterio real 2\"],\n" .
-        "      \"puntaje_vigesimal\": 20,\n" .
-        "      \"semana\": {$weeks},\n" .
-        "      \"fecha_sugerida\": \"fecha o semana\"\n" .
-        "    }\n" .
-        "  ],\n" .
-        "  \"metodologias\": [\"metodologia real 1\", \"metodologia real 2\", \"metodologia real 3\", \"metodologia real 4\"],\n" .
-        "  \"referencias\": [\n" .
-        "    {\"autor\":\"autor real o institucion\", \"anio\":\"anio\", \"titulo\":\"titulo real\", \"fuente\":\"editorial, revista o institucion\", \"url\":\"URL real, DOI o DOI no identificado\", \"utilidad\":\"utilidad para el curso\"}\n" .
-        "  ],\n" .
-        "  \"enlaces\": [\n" .
-        "    {\"titulo\":\"recurso real\", \"url\":\"URL real\", \"uso\":\"uso academico\"}\n" .
-        "  ]\n" .
-        "}\n\n" .
-        "CANTIDADES OBLIGATORIAS:\n" .
-        "- 4 resultados_curso.\n" .
-        "- 4 unidades.\n" .
-        "- Cada unidad debe tener contenidos reales y sesiones.\n" .
-        "- El total de sesiones no debe exceder semanas x sesiones_por_semana.\n" .
-        "- Minimo 3 evaluaciones globales: producto_unidad, resultado_aprendizaje y competencia.\n" .
-        "- 5 referencias.\n" .
-        "- 4 enlaces.\n\n" .
-        "Genera ahora el JSON completo para la asignatura {$course}.";
+        "DEVUELVE UN JSON CON ESTAS CLAVES EXACTAS:\\n" .
+        "datos_generales, sumilla, competencia_curso, resultados_curso, unidades, evaluaciones, metodologias, referencias, enlaces.\\n\\n" .
+        "datos_generales debe incluir: curso, programa, creditos, ciclo, semanas, sesiones_por_semana, modalidad, fecha_inicio, fecha_fin, sistema_evaluacion.\\n" .
+        "Cada unidad debe incluir: unidad, titulo, semanas, resultado_unidad, contenidos, sesiones, producto_unidad, evaluacion_producto_unidad.\\n" .
+        "Cada sesion debe incluir: semana, sesion, titulo, resultado_sesion, contenidos, actividad_aprendizaje, producto, fecha_sugerida.\\n" .
+        "Cada evaluacion debe incluir: tipo, descripcion, evidencia, criterios, puntaje_vigesimal, semana, fecha_sugerida.\\n" .
+        "Cada referencia debe incluir: autor, anio, titulo, fuente, url, utilidad.\\n" .
+        "Cada enlace debe incluir: titulo, url, uso.\\n\\n" .
+        "Genera ahora el JSON completo para {$course}.";
 
     jm_sse_start();
+
+    jm_sse_send('model_resolved', [
+        'ok' => true,
+        'event' => 'model_resolved',
+        'provider' => 'ollama_local',
+        'model' => $model,
+        'model_env' => jm_sync_env('SYLLABUS_OLLAMA_MODEL', 'llama3.2:1b'),
+        'request_model' => $requestModel,
+        'request_model_ignored' => !jm_sync_env_bool('SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE', false),
+        'request_model_override' => jm_sync_env_bool('SYLLABUS_ALLOW_REQUEST_MODEL_OVERRIDE', false),
+        'verification' => 'Confirmar con Ollama /api/ps mientras genera.',
+    ]);
 
     jm_sse_send('config', [
         'ok' => true,
         'tokens_config' => $tokensConfig,
-        'message' => "Generando silabo completo con {$model}.",
+        'message' => "Generando sílabo dinámico optimizado con {$model}.",
+        'render_mode' => 'syllabus_formatted',
     ]);
 
     $answer = '';
@@ -480,39 +939,64 @@ function jm_handle_syllabus_stream()
             $prompt,
             [
                 'temperature' => $temperature,
-                'top_p' => 0.85,
-                'repeat_penalty' => 1.08,
+                'top_p' => $topP,
+                'repeat_penalty' => 1.06,
                 'num_ctx' => $numCtx,
                 'num_predict' => $maxTokens,
-                'num_thread' => 4,
+                'num_thread' => (int)(getenv('SYLLABUS_NUM_THREAD') ?: 4),
             ],
             function ($piece) {
                 jm_sse_send('token', ['text' => $piece]);
-            }
+            },
+            'json'
         );
     } catch (Throwable $e) {
-        jm_sse_send('token', ['text' => "\n\n⚠️ " . $e->getMessage()]);
+        jm_sse_send('token', ['text' => "\\n\\n⚠️ " . $e->getMessage()]);
         jm_sse_send('final', [
             'ok' => false,
             'mode' => 'syllabus_stream',
             'response' => $answer,
+            'answer' => $answer,
             'message' => $e->getMessage(),
             'tokens_config' => $tokensConfig,
+            'render_mode' => 'syllabus_formatted',
         ]);
         exit;
     }
+
+    $syllabus = jm_syllabus_extract_json($answer);
+    $markdown = jm_syllabus_to_markdown($syllabus, $answer);
+    $parseOk = is_array($syllabus);
+
+    jm_sse_send('syllabus', [
+        'ok' => true,
+        'mode' => 'syllabus_stream',
+        'render_mode' => 'syllabus_formatted',
+        'parse_ok' => $parseOk,
+        'syllabus' => $syllabus,
+        'markdown' => $markdown,
+        'raw_response' => $answer,
+        'tokens_config' => $tokensConfig,
+    ]);
 
     jm_sse_send('final', [
         'ok' => true,
         'mode' => 'syllabus_stream',
         'model' => $model,
         'response' => $answer,
-        'answer' => $answer,
+        'raw_response' => $answer,
+        'answer' => $markdown,
+        'markdown' => $markdown,
+        'syllabus' => $syllabus,
+        'parse_ok' => $parseOk,
+        'render_mode' => 'syllabus_formatted',
         'tokens_config' => $tokensConfig,
+        'optimized' => true,
     ]);
 
     exit;
 }
+
 
 $__jm_path = jm_stream_path();
 
